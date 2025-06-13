@@ -8,6 +8,7 @@ pub enum GlobalDataKey {
     TargetRegion2Motif,
 }
 
+#[derive(Debug)]
 pub enum GlobalDataValue {
     // 第一个Arc<String> 表示的是 target name
     // 第二个 HashMap 的 usize 表示的是 target 的 位置
@@ -21,6 +22,7 @@ pub enum GlobalDataValue {
     ),
 }
 
+#[derive(Debug)]
 pub struct GlobalData {
     target_name2seq: HashMap<Arc<String>, Arc<String>>,
 

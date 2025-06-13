@@ -10,8 +10,14 @@ use crossbeam::channel::{Receiver, Sender};
 use gskits::pbar::{self, DEFAULT_INTERVAL};
 use mm2::query_seq_sender;
 
-use crate::{aligner::build_aligner, cli::{Cli, MetricArgs, Mode}, global_data::GlobalData, metrics::TMetric};
+use crate::{
+    aligner::build_aligner,
+    cli::{Cli, MetricArgs, Mode},
+    global_data::GlobalData,
+    metrics::{TMetric, hp_tr_metric::HpTrMetric},
+};
 
+pub mod aligned_pairs;
 pub mod aligner;
 pub mod cli;
 pub mod global_data;
@@ -21,7 +27,7 @@ fn main() {
     let cli = Cli::parse();
     match cli.mode {
         Mode::HpTr => {
-            // metric_entrance::<>(preset, tot_threads, args);
+            metric_entrance::<HpTrMetric>(&cli.preset, cli.threads, &cli.metric_args);
         }
     }
 }
