@@ -27,12 +27,12 @@ fn main() {
     let cli = Cli::parse();
     match cli.mode {
         Mode::HpTr => {
-            metric_entrance::<HpTrMetric>(&cli.preset, cli.threads, &cli.metric_args);
+            metric_entrance::<HpTrMetric>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
         }
     }
 }
 
-fn metric_entrance<M>(preset: &str, tot_threads: Option<usize>, args: &MetricArgs)
+fn metric_entrance<M>(preset: &str, tot_threads: Option<usize>, mode: Mode, args: &MetricArgs)
 where
     M: TMetric,
 {
@@ -80,7 +80,7 @@ where
         }
         drop(qs_recv);
         drop(metric_sender);
-        let oup_filename = args.get_oup_file();
+        let oup_filename = args.get_oup_file(mode);
         dump_metric_worker::<M>(metric_recv, &oup_filename, true);
     });
 }
@@ -118,24 +118,25 @@ where
 {
     let mut metric = M::default();
     metric.set_qname(read_info.name.clone());
-    metric.set_target_name(Arc::new("".to_string()));
-
-    if hits.is_empty() || (hits.len() > 1 && oup_params.discard_multi_align_reads) {
-        return metric;
-    }
 
     let hits = hits
         .into_iter()
         .filter(|v| v.is_primary || (v.is_supplementary && !oup_params.discard_supplementary))
         .collect::<Vec<_>>();
 
-    let mut target_name = hits
-        .iter()
-        .filter(|v| v.is_primary)
-        .take(1)
-        .map(|v| v.target_name.clone())
-        .collect::<Vec<_>>();
-    let target_name = target_name[0].take().unwrap();
+    let target_name = if hits.len() > 0 {
+        hits.iter()
+            .filter(|v| v.is_primary)
+            .take(1)
+            .map(|v| v.target_name.clone())
+            .collect::<Vec<_>>()[0]
+            .take()
+            .unwrap()
+    } else {
+        Arc::new("".to_string())
+    };
+
+    metric.set_target_name(target_name.clone());
 
     let hits = hits
         .into_iter()
@@ -169,8 +170,10 @@ where
 
     for metric in metric_recv {
         pb.as_ref().map(|v| v.inc(1));
-
-        writeln!(&mut writer, "{}", metric.get_metric_str().as_ref().unwrap()).unwrap();
+        let metric_str = metric.get_metric_str().as_ref().unwrap();
+        if !metric_str.is_empty() {
+            writeln!(&mut writer, "{}", metric_str).unwrap();
+        }
     }
 
     pb.as_ref().map(|v| v.finish());

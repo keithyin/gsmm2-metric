@@ -13,7 +13,7 @@ pub struct Cli {
         help="read https://lh3.github.io/minimap2/minimap2.html for more details")]
     pub preset: String,
 
-    #[arg(value_enum)]
+    #[arg(value_enum, long="mode")]
     pub mode: Mode,
 
     #[arg(
@@ -106,8 +106,8 @@ pub struct MetricArgs {
 }
 
 impl MetricArgs {
-    pub fn get_oup_file(&self) -> String {
-        self.io_args.get_oup_filename()
+    pub fn get_oup_file(&self, mode: Mode) -> String {
+        self.io_args.get_oup_filename(mode)
     }
 }
 
@@ -147,13 +147,14 @@ pub struct IoArgs {
 }
 
 impl IoArgs {
-    pub fn get_oup_filename(&self) -> String {
+    pub fn get_oup_filename(&self, mode: Mode) -> String {
         let out_fn = if let Some(oup) = &self.outfn {
             oup.to_string()
         } else {
             format!(
-                "{}.gsmm2_aligned_metric.csv",
-                self.query[0].rsplit_once(".").unwrap().0
+                "{}.{:?}-fact.csv",
+                self.query[0].rsplit_once(".").unwrap().0,
+                mode
             )
         };
         if let Some(dir) = path::Path::new(&out_fn).to_path_buf().parent() {

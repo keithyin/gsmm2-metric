@@ -1,17 +1,3 @@
-/*
-
-0 => Cigar::Match(cnt),
-                1 => Cigar::Ins(cnt),
-                2 => Cigar::Del(cnt),
-                3 => Cigar::RefSkip(cnt),
-                4 => Cigar::SoftClip(cnt),
-                5 => Cigar::HardClip(cnt),
-                6 => Cigar::Pad(cnt),
-                7 => Cigar::Equal(cnt),
-                8 => Cigar::Diff(cnt),
-
-*/
-
 use mm2::minimap2::Mapping;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,6 +38,7 @@ pub trait TAlignedPairs {
     fn is_reverse(&self) -> bool;
     fn cigars(&self) -> &[(u32, u8)]; // 如果是 reverse，那么是 reverse 后的 cigar。
 
+    /// 如果是 reverse的，返回结果中，query的位置是倒序的
     fn aligned_pairs(&self) -> impl Iterator<Item = (Option<i64>, Option<i64>, AlignOp)> {
         let mut query_cursor = if self.is_reverse() {
             self.query_end() - 1

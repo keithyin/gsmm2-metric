@@ -40,32 +40,6 @@ pub struct HpTrMetric {
     metric_str: Option<String>,
 }
 
-// impl Display for HpTrMetric {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let mut result_items = vec![];
-//         for (key, fwd_rev_counters) in &self.metric_core {
-//             for (idx, counter) in fwd_rev_counters.iter().enumerate() {
-//                 let mut innner_items = vec![];
-//                 innner_items.push(self.qname.clone());
-//                 innner_items.push(self.tname.as_ref().clone());
-//                 innner_items.push(if idx == 0 {
-//                     key.as_ref().clone()
-//                 } else {
-//                     reverse_complement_motif(&key)
-//                 });
-
-//                 innner_items.push(counter.eq.to_string());
-//                 innner_items.push(counter.diff.to_string());
-//                 innner_items.push(counter.ins.to_string());
-//                 innner_items.push(counter.del.to_string());
-
-//                 result_items.push(innner_items.join("\t"));
-//             }
-//         }
-//         write!(f, "{}", result_items.join("\n"))
-//     }
-// }
-
 impl TMetric for HpTrMetric {
     fn csv_header() -> String {
         let csv_header = vec![
