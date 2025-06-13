@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, i64, sync::Arc};
 
 use gskits::dna::reverse_complement;
 use mm2::minimap2::Mapping;
@@ -6,26 +6,18 @@ use mm2::minimap2::Mapping;
 use crate::{
     aligned_pairs::{AlignOp, TAlignedPairs},
     global_data::{GlobalData, GlobalDataKey, GlobalDataValue},
-    metrics::TMetric,
+    metrics::{BASE_COMP, TMetric},
 };
 
 #[derive(Debug, Default)]
-pub struct AlignCounter {
-    pub eq: usize,
-    pub diff: usize,
-    pub ins: usize,
-    pub del: usize,
+struct Counter {
+    counts: [HashMap<usize, usize>; 2], // [non-misc, misc]
 }
 
-impl AlignCounter {
-    pub fn update(&mut self, align_op: AlignOp) {
-        match align_op {
-            AlignOp::Equal(n) => self.eq += n as usize,
-            AlignOp::Diff(n) => self.diff += n as usize,
-            AlignOp::Ins(n) => self.ins += n as usize,
-            AlignOp::Del(n) => self.del += n as usize,
-            _ => panic!("not a valid align op: {:?}", align_op),
-        }
+impl Counter {
+    pub fn update(&mut self, misc: bool, cnt: usize) {
+        let idx = if misc { 1 } else { 0 };
+        *self.counts[idx].entry(cnt).or_default() += 1;
     }
 }
 
@@ -36,7 +28,7 @@ pub struct HpTrMetric {
     global_data: Option<Arc<GlobalData>>,
     align_infos: Vec<Mapping>,
     //Arc<String> for motif string. [fwd_counter, rev_counter]
-    metric_core: HashMap<Arc<String>, [AlignCounter; 2]>,
+    metric_core: HashMap<Arc<String>, [Counter; 2]>,
     metric_str: Option<String>,
 }
 
@@ -67,54 +59,74 @@ impl TMetric for HpTrMetric {
     fn get_global_data(&self) -> &GlobalData {
         self.global_data.as_ref().unwrap()
     }
-    fn compute_metric(&mut self, _read_info: &mm2::gskits::ds::ReadInfo) {
+    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo) {
         if self.align_infos.is_empty() {
             return;
         }
+
+        let read_seq = read_info.seq.as_bytes();
 
         let region2motif = self
             .global_data
             .as_ref()
             .unwrap()
-            .get(GlobalDataKey::TargetRegion2Motif4HpTr);
+            .get(GlobalDataKey::TargetRegion2Motif4Hp);
         let region2motif = match region2motif {
-            GlobalDataValue::TargetRegion2Motif4HpTr(value) => value,
+            GlobalDataValue::TargetRegion2Motif4Hp(value) => value,
             _ => panic!(""),
         };
         let tname = self.align_infos[0].target_name.as_ref().unwrap().clone();
         let region2motif = region2motif.get().unwrap().get(&tname).unwrap();
 
         for align_info in &self.align_infos {
-            let mut pre_ins_cnt = 0;
-            let target_start = align_info.target_start() as usize;
-            let target_end = align_info.target_end() as usize;
             let strand_idx = if align_info.is_reverse() { 1 } else { 0 };
 
-            for (_qpos, rpos, align_op) in align_info.aligned_pairs() {
-                if let Some(rpos) = rpos {
-                    if let Some(motifs) = region2motif.get(&(rpos as usize)) {
-                        motifs
-                            .iter()
-                            .filter(|motif| motif.0.0 >= target_start && motif.0.1 <= target_end)
-                            .for_each(|motif| {
-                                // if motif.1.as_ref().eq("(CA)3") {
-                                //     println!("motif:{:?}", motif);
-                                // }
+            for v in
+                region2motif.query(align_info.target_start as usize..align_info.target_end as usize)
+            {
+                let (start, end) = (v.range.start, v.range.end);
 
-                                self.metric_core.entry(motif.1.clone()).or_default()[strand_idx]
-                                    .update(align_op);
+                if start < align_info.target_start as usize || end > align_info.query_end as usize {
+                    continue;
+                }
 
-                                self.metric_core.entry(motif.1.clone()).or_default()[strand_idx]
-                                    .update(AlignOp::Ins(pre_ins_cnt));
-                            });
+                let motif = v.value.clone();
+                let target_base = if align_info.is_reverse() {
+                    BASE_COMP[&motif.as_bytes()[1]]
+                } else {
+                    motif.as_bytes()[1]
+                };
+
+                let mut aligned_pair_iter = Box::new(
+                    align_info
+                        .aligned_pairs()
+                        .take_while(|(_qpos, rpos, _align_op)| {
+                            rpos.unwrap_or(i64::MIN) < end as i64
+                        }),
+                )
+                    as Box<dyn Iterator<Item = (Option<i64>, Option<i64>, AlignOp)>>;
+                if start > align_info.target_start as usize {
+                    aligned_pair_iter = Box::new(
+                        aligned_pair_iter
+                            .skip_while(|(_qpos, rpos, _align_op)| rpos != &Some(start as i64 - 1)),
+                    )
+                        as Box<dyn Iterator<Item = (Option<i64>, Option<i64>, AlignOp)>>;
+                }
+
+                let mut cnt = 0;
+                let mut is_misc = false;
+                for (qpos, _rpos, align_op) in aligned_pair_iter {
+                    if let Some(qpos) = qpos {
+                        cnt += if read_seq[qpos as usize] == target_base {
+                            1
+                        } else {
+                            1
+                        };
+                        is_misc |= read_seq[qpos as usize] != target_base;
                     }
                 }
 
-                if rpos.is_none() {
-                    pre_ins_cnt += 1;
-                } else {
-                    pre_ins_cnt = 0;
-                }
+                self.metric_core.entry(motif.clone()).or_default()[strand_idx].update(is_misc, cnt);
             }
         }
     }
@@ -123,21 +135,29 @@ impl TMetric for HpTrMetric {
         let mut result_items = vec![];
         for (key, fwd_rev_counters) in &self.metric_core {
             for (idx, counter) in fwd_rev_counters.iter().enumerate() {
-                let mut innner_items = vec![];
-                innner_items.push(self.qname.as_ref().unwrap().clone());
-                innner_items.push(self.tname.as_ref().unwrap().as_ref().clone());
-                innner_items.push(if idx == 0 {
-                    key.as_ref().clone()
-                } else {
-                    reverse_complement_motif(key)
-                });
+                for (misc_idx, cnt) in counter.counts.iter().enumerate() {
+                    let mut innner_items = vec![];
+                    innner_items.push(self.qname.as_ref().unwrap().clone());
+                    innner_items.push(self.tname.as_ref().unwrap().as_ref().clone());
+                    innner_items.push(if idx == 0 {
+                        key.as_ref().clone()
+                    } else {
+                        reverse_complement_motif(key)
+                    });
 
-                innner_items.push(counter.eq.to_string());
-                innner_items.push(counter.diff.to_string());
-                innner_items.push(counter.ins.to_string());
-                innner_items.push(counter.del.to_string());
+                    innner_items.push(if misc_idx == 0 {
+                        "non-misc".to_string()
+                    } else {
+                        "misc".to_string()
+                    });
 
-                result_items.push(innner_items.join("\t"));
+                    innner_items.push(counter.eq.to_string());
+                    innner_items.push(counter.diff.to_string());
+                    innner_items.push(counter.ins.to_string());
+                    innner_items.push(counter.del.to_string());
+
+                    result_items.push(innner_items.join("\t"));
+                }
             }
         }
         result_items.join("\n")

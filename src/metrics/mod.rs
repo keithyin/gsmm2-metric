@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::global_data::GlobalData;
 
+pub mod hp_metric;
 pub mod hp_tr_metric;
 
 pub trait TMetric: Send + 'static + Default {
@@ -35,4 +36,15 @@ pub trait TMetric: Send + 'static + Default {
         let metric_str = self.build_metric_str();
         *self.get_metric_str_mut() = Some(metric_str);
     }
+}
+
+lazy_static::lazy_static! {
+    pub static ref BASE_COMP: HashMap<u8, u8> = {
+        let mut  m = HashMap::new();
+        m.insert('A' as u8, 'T' as u8);
+        m.insert('C' as u8, 'G' as u8);
+        m.insert('G' as u8, 'C' as u8);
+        m.insert('T' as u8, 'A' as u8);
+        m
+    };
 }

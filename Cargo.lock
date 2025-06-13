@@ -717,6 +717,7 @@ dependencies = [
  "crossbeam",
  "gskits",
  "hp_tr_finder 0.3.0",
+ "lazy_static",
  "mm2",
  "num_cpus",
  "once_cell",
