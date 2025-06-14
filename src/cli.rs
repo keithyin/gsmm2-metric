@@ -57,6 +57,8 @@ impl Cli {
 pub enum Mode {
     /// homopolymer and tandem repeats
     HpTr,
+    /// homopolymer only
+    Hp
 }
 
 #[derive(Debug, Args, Clone, Copy, Default)]

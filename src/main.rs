@@ -14,7 +14,7 @@ use crate::{
     aligner::build_aligner,
     cli::{Cli, MetricArgs, Mode},
     global_data::GlobalData,
-    metrics::{TMetric, hp_tr_metric::HpTrMetric},
+    metrics::{TMetric, hp_metric::HpMetric, hp_tr_metric::HpTrMetric},
 };
 
 pub mod aligned_pairs;
@@ -28,6 +28,9 @@ fn main() {
     match cli.mode {
         Mode::HpTr => {
             metric_entrance::<HpTrMetric>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
+        }
+        Mode::Hp => {
+            metric_entrance::<HpMetric>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
         }
     }
 }

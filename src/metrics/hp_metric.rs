@@ -22,7 +22,7 @@ impl Counter {
 }
 
 #[derive(Debug, Default)]
-pub struct HpTrMetric {
+pub struct HpMetric {
     qname: Option<String>,
     tname: Option<Arc<String>>,
     global_data: Option<Arc<GlobalData>>,
@@ -32,16 +32,15 @@ pub struct HpTrMetric {
     metric_str: Option<String>,
 }
 
-impl TMetric for HpTrMetric {
+impl TMetric for HpMetric {
     fn csv_header() -> String {
         let csv_header = vec![
             "qname".to_string(),
             "rname".to_string(),
             "motif".to_string(),
-            "eq".to_string(),
-            "diff".to_string(),
-            "ins".to_string(),
-            "del".to_string(),
+            "tag".to_string(),
+            "called".to_string(),
+            "num".to_string(),
         ];
         csv_header.join("\t")
     }
@@ -85,10 +84,13 @@ impl TMetric for HpTrMetric {
                 region2motif.query(align_info.target_start as usize..align_info.target_end as usize)
             {
                 let (start, end) = (v.range.start, v.range.end);
-
-                if start < align_info.target_start as usize || end > align_info.query_end as usize {
+                // println!("interest_region_start_end:{}-{}, align_start_end:{}-{}", start, end, align_info.target_start, align_info.target_end);
+                if start < align_info.target_start as usize || end > align_info.target_end as usize
+                {
                     continue;
                 }
+
+                // println!("herr");
 
                 let motif = v.value.clone();
                 let target_base = if align_info.is_reverse() {
@@ -96,31 +98,34 @@ impl TMetric for HpTrMetric {
                 } else {
                     motif.as_bytes()[1]
                 };
-
-                let mut aligned_pair_iter = Box::new(
-                    align_info
-                        .aligned_pairs()
-                        .take_while(|(_qpos, rpos, _align_op)| {
-                            rpos.unwrap_or(i64::MIN) < end as i64
-                        }),
-                )
+                let mut pre_rpos = -1;
+                let mut aligned_pair_iter = Box::new(align_info.aligned_pairs().take_while(
+                    |(_qpos, rpos, _align_op)| {
+                        let pre_rpos_ = pre_rpos;
+                        if let Some(rpos) = rpos {
+                            pre_rpos = *rpos;
+                        }
+                        (pre_rpos_ + 1) < end as i64
+                    },
+                ))
                     as Box<dyn Iterator<Item = (Option<i64>, Option<i64>, AlignOp)>>;
                 if start > align_info.target_start as usize {
                     aligned_pair_iter = Box::new(
                         aligned_pair_iter
-                            .skip_while(|(_qpos, rpos, _align_op)| rpos != &Some(start as i64 - 1)),
+                            .skip_while(|(_qpos, rpos, _align_op)| rpos != &Some(start as i64 - 1))
+                            .skip(1),
                     )
                         as Box<dyn Iterator<Item = (Option<i64>, Option<i64>, AlignOp)>>;
                 }
 
                 let mut cnt = 0;
                 let mut is_misc = false;
-                for (qpos, _rpos, align_op) in aligned_pair_iter {
+                for (qpos, _rpos, _align_op) in aligned_pair_iter {
                     if let Some(qpos) = qpos {
                         cnt += if read_seq[qpos as usize] == target_base {
                             1
                         } else {
-                            1
+                            0
                         };
                         is_misc |= read_seq[qpos as usize] != target_base;
                     }
@@ -136,27 +141,26 @@ impl TMetric for HpTrMetric {
         for (key, fwd_rev_counters) in &self.metric_core {
             for (idx, counter) in fwd_rev_counters.iter().enumerate() {
                 for (misc_idx, cnt) in counter.counts.iter().enumerate() {
-                    let mut innner_items = vec![];
-                    innner_items.push(self.qname.as_ref().unwrap().clone());
-                    innner_items.push(self.tname.as_ref().unwrap().as_ref().clone());
-                    innner_items.push(if idx == 0 {
-                        key.as_ref().clone()
-                    } else {
-                        reverse_complement_motif(key)
+                    cnt.iter().for_each(|(&called, &num)| {
+                        let mut innner_items = vec![];
+                        innner_items.push(self.qname.as_ref().unwrap().clone());
+                        innner_items.push(self.tname.as_ref().unwrap().as_ref().clone());
+                        innner_items.push(if idx == 0 {
+                            key.as_ref().clone()
+                        } else {
+                            reverse_complement_motif(key)
+                        });
+
+                        innner_items.push(if misc_idx == 0 {
+                            "non-misc".to_string()
+                        } else {
+                            "misc".to_string()
+                        });
+
+                        innner_items.push(format!("={}", called));
+                        innner_items.push(format!("{}", num));
+                        result_items.push(innner_items.join("\t"));
                     });
-
-                    innner_items.push(if misc_idx == 0 {
-                        "non-misc".to_string()
-                    } else {
-                        "misc".to_string()
-                    });
-
-                    innner_items.push(counter.eq.to_string());
-                    innner_items.push(counter.diff.to_string());
-                    innner_items.push(counter.ins.to_string());
-                    innner_items.push(counter.del.to_string());
-
-                    result_items.push(innner_items.join("\t"));
                 }
             }
         }
@@ -209,7 +213,7 @@ mod test {
 
     use crate::{
         global_data::GlobalData,
-        metrics::{TMetric, hp_tr_metric::HpTrMetric},
+        metrics::{TMetric, hp_metric::HpMetric},
     };
 
     #[test]
@@ -283,7 +287,7 @@ mod test {
             println!("");
         }
 
-        let mut metric = HpTrMetric::default();
+        let mut metric = HpMetric::default();
         metric.set_qname("query".to_string());
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
@@ -311,7 +315,7 @@ mod test {
             println!("");
         }
 
-        let mut metric = HpTrMetric::default();
+        let mut metric = HpMetric::default();
         metric.set_qname("query".to_string());
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
