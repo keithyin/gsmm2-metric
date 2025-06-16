@@ -3,7 +3,10 @@ use std::{collections::HashMap, sync::Arc};
 use crate::global_data::GlobalData;
 
 pub mod hp_metric;
+pub mod hp_metric_v2;
 pub mod hp_tr_metric;
+pub mod hp_tr_metric_v2;
+pub mod hp_tr_tools;
 
 pub trait TMetric: Send + 'static + Default {
     fn csv_header() -> String;

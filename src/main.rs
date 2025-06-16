@@ -8,13 +8,16 @@ use std::{
 use clap::Parser;
 use crossbeam::channel::{Receiver, Sender};
 use gskits::pbar::{self, DEFAULT_INTERVAL};
-use mm2::query_seq_sender;
+use mm2::{mapping_ext::MappingExt, query_seq_sender};
 
 use crate::{
     aligner::build_aligner,
     cli::{Cli, MetricArgs, Mode},
     global_data::GlobalData,
-    metrics::{TMetric, hp_metric::HpMetric, hp_tr_metric::HpTrMetric},
+    metrics::{
+        TMetric, hp_metric::HpMetric, hp_metric_v2::HpMetricV2, hp_tr_metric::HpTrMetric,
+        hp_tr_metric_v2::HpTrMetricV2,
+    },
 };
 
 pub mod aligned_pairs;
@@ -29,8 +32,15 @@ fn main() {
         Mode::HpTr => {
             metric_entrance::<HpTrMetric>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
         }
+        Mode::HpTrV2 => {
+            metric_entrance::<HpTrMetricV2>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
+        }
         Mode::Hp => {
             metric_entrance::<HpMetric>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
+        }
+
+        Mode::HpV2 => {
+            metric_entrance::<HpMetricV2>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
         }
     }
 }
@@ -144,6 +154,7 @@ where
     let hits = hits
         .into_iter()
         .filter(|v| v.target_name.as_ref().unwrap() == &target_name)
+        .filter(|v| MappingExt(v).identity() > 0.75)
         .collect::<Vec<_>>();
 
     metric.set_global_data(global_data);
@@ -164,7 +175,7 @@ where
 
     let pb = if enable_pb {
         Some(pbar::get_spin_pb(
-            format!("gsmm2-time-err: writing metric to {}", fname),
+            format!("gsmm2-metric: writing metric to {}", fname),
             DEFAULT_INTERVAL,
         ))
     } else {

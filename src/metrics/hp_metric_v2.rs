@@ -1,12 +1,16 @@
 use std::{collections::HashMap, i64, sync::Arc};
 
-use gskits::dna::reverse_complement;
+use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
 use mm2::minimap2::Mapping;
+use regex::Regex;
 
 use crate::{
     aligned_pairs::{AlignOp, TAlignedPairs},
     global_data::{GlobalData, GlobalDataKey, GlobalDataValue},
-    metrics::{BASE_COMP, TMetric},
+    metrics::{
+        TMetric,
+        hp_tr_tools::{do_align_4_homo, get_target_substr},
+    },
 };
 
 #[derive(Debug, Default)]
@@ -21,18 +25,24 @@ impl Counter {
     }
 }
 
+lazy_static::lazy_static! {
+    static ref HP_REG: Vec<HashMap<String, Regex>> = {
+        vec![UnitAndRepeats::new(1, 3).build_finder_regrex()]
+    };
+}
+
 #[derive(Debug, Default)]
-pub struct HpMetric {
+pub struct HpMetricV2 {
     qname: Option<String>,
     tname: Option<Arc<String>>,
     global_data: Option<Arc<GlobalData>>,
     align_infos: Vec<Mapping>,
     //Arc<String> for motif string. [fwd_counter, rev_counter]
-    metric_core: HashMap<Arc<String>, [Counter; 2]>,
+    metric_core: HashMap<Arc<String>, Counter>,
     metric_str: Option<String>,
 }
 
-impl TMetric for HpMetric {
+impl TMetric for HpMetricV2 {
     fn csv_header() -> String {
         let csv_header = vec![
             "qname".to_string(),
@@ -62,28 +72,53 @@ impl TMetric for HpMetric {
         if self.align_infos.is_empty() {
             return;
         }
-
-        let read_seq = read_info.seq.as_bytes();
-
-        let region2motif = self
+        let target_name = self.align_infos[0].target_name.as_ref().unwrap();
+        let global_data_value = self
             .global_data
             .as_ref()
             .unwrap()
-            .get(GlobalDataKey::TargetRegion2Motif4Hp);
-        let region2motif = match region2motif {
-            GlobalDataValue::TargetRegion2Motif4Hp(value) => value,
+            .get(GlobalDataKey::TargetName2SeqAndRev);
+        let [target_seq_fwd, target_seq_rev] = match global_data_value {
+            GlobalDataValue::TargetName2SeqAndRev(v) => v.get().unwrap().get(target_name).unwrap(),
             _ => panic!(""),
         };
-        let tname = self.align_infos[0].target_name.as_ref().unwrap().clone();
-        let region2motif = region2motif.get().unwrap().get(&tname).unwrap();
+
+        // let read_seq = read_info.seq.as_bytes();
 
         for align_info in &self.align_infos {
-            let strand_idx = if align_info.is_reverse() { 1 } else { 0 };
+            let read_seq = &read_info.seq.as_bytes()
+                [align_info.query_start as usize..align_info.query_end as usize];
 
-            for v in
-                region2motif.query(align_info.target_start as usize..align_info.target_end as usize)
-            {
-                let (start, end) = (v.range.start, v.range.end);
+            let target_substr = get_target_substr(
+                align_info.target_start as usize,
+                align_info.target_end as usize,
+                align_info.is_reverse(),
+                target_seq_fwd,
+                target_seq_rev,
+            );
+
+            let align_info = do_align_4_homo(
+                &read_info.seq,
+                align_info.query_start as usize,
+                align_info.query_end as usize,
+                target_substr,
+            );
+            if align_info.is_none() {
+                continue;
+            }
+            let align_info = align_info.unwrap();
+
+            // let (aligned_target, aligned_query) =
+            //     MappingExt(&align_info).aligned_2_str(target_substr.as_bytes(), read_seq);
+            // println!("target:{}", aligned_target);
+            // println!("query :{}", aligned_query);
+
+            assert!(matches!(align_info.strand, mm2::minimap2::Strand::Forward));
+            let mut match_patterns: HashMap<String, Arc<String>> = HashMap::new();
+            let region2motif = single_seq_hp_tr_finder(&HP_REG, &mut match_patterns, target_substr);
+
+            for v in region2motif.iter() {
+                let (start, end) = (v.0.0, v.0.1);
                 // println!("interest_region_start_end:{}-{}, align_start_end:{}-{}", start, end, align_info.target_start, align_info.target_end);
                 if start < align_info.target_start as usize || end > align_info.target_end as usize
                 {
@@ -92,12 +127,8 @@ impl TMetric for HpMetric {
 
                 // println!("herr");
 
-                let motif = v.value.clone();
-                let target_base = if align_info.is_reverse() {
-                    BASE_COMP[&motif.as_bytes()[1]]
-                } else {
-                    motif.as_bytes()[1]
-                };
+                let motif = v.1.clone();
+                let target_base = motif.as_bytes()[1];
                 let mut pre_rpos = -1;
                 let mut aligned_pair_iter = Box::new(align_info.aligned_pairs().take_while(
                     |(_qpos, rpos, _align_op)| {
@@ -131,37 +162,34 @@ impl TMetric for HpMetric {
                     }
                 }
 
-                self.metric_core.entry(motif.clone()).or_default()[strand_idx].update(is_misc, cnt);
+                self.metric_core
+                    .entry(motif.clone())
+                    .or_default()
+                    .update(is_misc, cnt);
             }
         }
     }
 
     fn build_metric_str(&mut self) -> String {
         let mut result_items = vec![];
-        for (key, fwd_rev_counters) in &self.metric_core {
-            for (idx, counter) in fwd_rev_counters.iter().enumerate() {
-                for (misc_idx, cnt) in counter.counts.iter().enumerate() {
-                    cnt.iter().for_each(|(&called, &num)| {
-                        let mut innner_items = vec![];
-                        innner_items.push(self.qname.as_ref().unwrap().clone());
-                        innner_items.push(self.tname.as_ref().unwrap().as_ref().clone());
-                        innner_items.push(if idx == 0 {
-                            key.as_ref().clone()
-                        } else {
-                            reverse_complement_motif(key)
-                        });
+        for (key, counter) in &self.metric_core {
+            for (misc_idx, cnt) in counter.counts.iter().enumerate() {
+                cnt.iter().for_each(|(&called, &num)| {
+                    let mut innner_items = vec![];
+                    innner_items.push(self.qname.as_ref().unwrap().clone());
+                    innner_items.push(self.tname.as_ref().unwrap().as_ref().clone());
+                    innner_items.push(key.as_ref().clone());
 
-                        innner_items.push(if misc_idx == 0 {
-                            "pure".to_string()
-                        } else {
-                            "mixed".to_string()
-                        });
-
-                        innner_items.push(format!("{}", called));
-                        innner_items.push(format!("{}", num));
-                        result_items.push(innner_items.join("\t"));
+                    innner_items.push(if misc_idx == 0 {
+                        "pure".to_string()
+                    } else {
+                        "mixed".to_string()
                     });
-                }
+
+                    innner_items.push(format!("{}", called));
+                    innner_items.push(format!("{}", num));
+                    result_items.push(innner_items.join("\t"));
+                });
             }
         }
         result_items.join("\n")
@@ -185,18 +213,6 @@ impl TMetric for HpMetric {
     }
 }
 
-fn reverse_complement_motif(s: &str) -> String {
-    // 用正则提取括号里的序列
-    let re = regex::Regex::new(r"\((?P<seq>[ACGT]+)\)").unwrap();
-
-    re.replace_all(s, |caps: &regex::Captures| {
-        let seq = &caps["seq"];
-        let rc = reverse_complement(seq.as_bytes());
-        format!("({})", String::from_utf8(rc).unwrap())
-    })
-    .into_owned()
-}
-
 #[cfg(test)]
 mod test {
     use std::{collections::HashMap, sync::Arc};
@@ -213,7 +229,7 @@ mod test {
 
     use crate::{
         global_data::GlobalData,
-        metrics::{TMetric, hp_metric::HpMetric},
+        metrics::{TMetric, hp_metric_v2::HpMetricV2},
     };
 
     #[test]
@@ -240,11 +256,7 @@ mod test {
         index_params.kmer = Some(11);
         index_params.wins = Some(1);
 
-        let align_params = AlignParams::default()
-            .set_m_score(4)
-            .set_mm_score(10)
-            .set_gap_open_penalty("4,48".to_string())
-            .set_gap_extension_penalty("2,1".to_string());
+        let align_params = AlignParams::default();
         let mut aligners = build_aligner(
             "map-ont",
             &index_params,
@@ -275,19 +287,19 @@ mod test {
 
         let hits = align_single_query_to_targets(&fwd_query_record, &aligners);
 
-        for hit in &hits {
-            let mapping_ext = MappingExt(hit);
-            let (aligned_target, aligned_query) =
-                mapping_ext.aligned_2_str(target_seq.as_bytes(), fwd_part);
-            println!(
-                "query_range:{}-{}, target_range:{}-{}, strand:{:?}",
-                hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand
-            );
-            println!("target:{}\nquery :{}", aligned_target, aligned_query);
-            println!("");
-        }
+        // for hit in &hits {
+        //     let mapping_ext = MappingExt(hit);
+        //     let (aligned_target, aligned_query) =
+        //         mapping_ext.aligned_2_str(target_seq.as_bytes(), fwd_part);
+        //     println!(
+        //         "query_range:{}-{}, target_range:{}-{}, strand:{:?}",
+        //         hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand
+        //     );
+        //     println!("target:{}\nquery :{}", aligned_target, aligned_query);
+        //     println!("");
+        // }
 
-        let mut metric = HpMetric::default();
+        let mut metric = HpMetricV2::default();
         metric.set_qname("query".to_string());
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
@@ -303,19 +315,19 @@ mod test {
 
         let hits = align_single_query_to_targets(&rev_query_record, &aligners);
 
-        for hit in &hits {
-            let mapping_ext = MappingExt(hit);
-            let (aligned_target, aligned_query) =
-                mapping_ext.aligned_2_str(target_seq.as_bytes(), rev_part);
-            println!(
-                "query_range:{}-{}, target_range:{}-{}, strand:{:?}",
-                hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand
-            );
-            println!("target:{}\nquery :{}", aligned_target, aligned_query);
-            println!("");
-        }
+        // for hit in &hits {
+        //     let mapping_ext = MappingExt(hit);
+        //     let (aligned_target, aligned_query) =
+        //         mapping_ext.aligned_2_str(target_seq.as_bytes(), rev_part);
+        //     println!(
+        //         "query_range:{}-{}, target_range:{}-{}, strand:{:?}",
+        //         hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand
+        //     );
+        //     println!("target:{}\nquery :{}", aligned_target, aligned_query);
+        //     println!("");
+        // }
 
-        let mut metric = HpMetric::default();
+        let mut metric = HpMetricV2::default();
         metric.set_qname("query".to_string());
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
@@ -349,11 +361,7 @@ mod test {
         index_params.kmer = Some(11);
         index_params.wins = Some(1);
 
-        let align_params = AlignParams::default()
-            .set_m_score(4)
-            .set_mm_score(10)
-            .set_gap_open_penalty("4,48".to_string())
-            .set_gap_extension_penalty("2,1".to_string());
+        let align_params = AlignParams::default();
         let mut aligners = build_aligner(
             "map-ont",
             &index_params,
@@ -390,13 +398,18 @@ mod test {
                 mapping_ext.aligned_2_str(target_seq.as_bytes(), fwd_part);
             println!(
                 "query_range:{}-{}, target_range:{}-{}, strand:{:?}, identity:{}",
-                hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand, mapping_ext.identity()
+                hit.query_start,
+                hit.query_end,
+                hit.target_start,
+                hit.target_end,
+                hit.strand,
+                mapping_ext.identity()
             );
             println!("target:{}\nquery :{}", aligned_target, aligned_query);
             println!("");
         }
 
-        let mut metric = HpMetric::default();
+        let mut metric = HpMetricV2::default();
         metric.set_qname("query".to_string());
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
