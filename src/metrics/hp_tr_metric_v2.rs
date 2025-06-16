@@ -98,32 +98,35 @@ impl TMetric for HpTrMetricV2 {
             _ => panic!(""),
         };
 
-        for align_info in &self.align_infos {
+        for old_align_info in &self.align_infos {
             let target_substr = get_target_substr(
-                align_info.target_start as usize,
-                align_info.target_end as usize,
-                align_info.is_reverse(),
+                old_align_info.target_start as usize,
+                old_align_info.target_end as usize,
+                old_align_info.is_reverse(),
                 target_seq_fwd,
                 target_seq_rev,
             );
 
             let align_info = do_align_4_homo(
                 &read_info.seq,
-                align_info.query_start as usize,
-                align_info.query_end as usize,
+                old_align_info.query_start as usize,
+                old_align_info.query_end as usize,
                 target_substr,
             );
             if align_info.is_none() {
+                tracing::warn!(
+                    "no aligned result. QueryName:{}. QueryStartEnd:{}-{}, TargetStartEnd:{}-{}, strand:{:?}",
+                    read_info.name,
+                    old_align_info.query_start,
+                    old_align_info.query_end,
+                    old_align_info.target_start,
+                    old_align_info.target_end,
+                    old_align_info.strand
+                );
                 continue;
             }
             let align_info = align_info.unwrap();
 
-            // let (aligned_target, aligned_query) =
-            //     MappingExt(&align_info).aligned_2_str(target_substr.as_bytes(), read_seq);
-            // println!("target:{}", aligned_target);
-            // println!("query :{}", aligned_query);
-
-            assert!(matches!(align_info.strand, mm2::minimap2::Strand::Forward));
             let mut match_patterns: HashMap<String, Arc<String>> = HashMap::new();
             let region2motif =
                 single_seq_hp_tr_finder(&HP_TR_REG, &mut match_patterns, target_substr).flatten();

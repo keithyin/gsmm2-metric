@@ -104,6 +104,15 @@ impl TMetric for HpMetricV2 {
                 target_substr,
             );
             if align_info.is_none() {
+                tracing::warn!(
+                    "no aligned result. QueryName:{}. QueryStartEnd:{}-{}, TargetStartEnd:{}-{}, strand:{:?}",
+                    read_info.name,
+                    old_align_info.query_start,
+                    old_align_info.query_end,
+                    old_align_info.target_start,
+                    old_align_info.target_end,
+                    old_align_info.strand
+                );
                 continue;
             }
             let align_info = align_info.unwrap();
@@ -144,7 +153,7 @@ impl TMetric for HpMetricV2 {
 
                 let mut cnt = 0;
                 let mut is_misc = false;
-                
+
                 for (qpos, _rpos, _align_op) in aligned_pair_iter {
                     if let Some(qpos) = qpos {
                         cnt += if read_seq[qpos as usize] == target_base {
