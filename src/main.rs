@@ -28,6 +28,25 @@ pub mod metrics;
 
 fn main() {
     let cli = Cli::parse();
+    let log_filepath = cli.metric_args.get_log_file(cli.mode);
+    let log_file = std::fs::File::create(&log_filepath)
+        .expect(&format!("create run log file error: {}", &log_filepath));
+    let (non_blocking, _guard) = tracing_appender::non_blocking(log_file);
+
+    let time_fmt = time::format_description::parse(
+        "[year]-[month padding:zero]-[day padding:zero]#[hour]:[minute]:[second]",
+    )
+    .unwrap();
+
+    let time_offset =
+        time::UtcOffset::current_local_offset().unwrap_or_else(|_| time::UtcOffset::UTC);
+    let timer = tracing_subscriber::fmt::time::OffsetTime::new(time_offset, time_fmt.clone());
+    tracing_subscriber::fmt::fmt()
+        .with_timer(timer)
+        .with_ansi(false)
+        .with_writer(non_blocking)
+        .init();
+
     match cli.mode {
         Mode::HpTr => {
             metric_entrance::<HpTrMetric>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);

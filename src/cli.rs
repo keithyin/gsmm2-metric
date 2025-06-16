@@ -116,6 +116,9 @@ impl MetricArgs {
     pub fn get_oup_file(&self, mode: Mode) -> String {
         self.io_args.get_oup_filename(mode)
     }
+    pub fn get_log_file(&self, mode: Mode) -> String {
+        format!("{}.log", self.get_oup_file(mode))
+    }
 }
 
 #[derive(Debug, Args, Clone)]

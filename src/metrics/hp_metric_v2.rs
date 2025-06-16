@@ -1,7 +1,7 @@
 use std::{collections::HashMap, i64, sync::Arc};
 
 use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
-use mm2::minimap2::Mapping;
+use mm2::{mapping_ext::MappingExt, minimap2::Mapping};
 use regex::Regex;
 
 use crate::{
@@ -85,22 +85,22 @@ impl TMetric for HpMetricV2 {
 
         // let read_seq = read_info.seq.as_bytes();
 
-        for align_info in &self.align_infos {
+        for old_align_info in &self.align_infos {
             let read_seq = &read_info.seq.as_bytes()
-                [align_info.query_start as usize..align_info.query_end as usize];
+                [old_align_info.query_start as usize..old_align_info.query_end as usize];
 
             let target_substr = get_target_substr(
-                align_info.target_start as usize,
-                align_info.target_end as usize,
-                align_info.is_reverse(),
+                old_align_info.target_start as usize,
+                old_align_info.target_end as usize,
+                old_align_info.is_reverse(),
                 target_seq_fwd,
                 target_seq_rev,
             );
 
             let align_info = do_align_4_homo(
                 &read_info.seq,
-                align_info.query_start as usize,
-                align_info.query_end as usize,
+                old_align_info.query_start as usize,
+                old_align_info.query_end as usize,
                 target_substr,
             );
             if align_info.is_none() {
@@ -108,27 +108,20 @@ impl TMetric for HpMetricV2 {
             }
             let align_info = align_info.unwrap();
 
-            // let (aligned_target, aligned_query) =
-            //     MappingExt(&align_info).aligned_2_str(target_substr.as_bytes(), read_seq);
-            // println!("target:{}", aligned_target);
-            // println!("query :{}", aligned_query);
-
             assert!(matches!(align_info.strand, mm2::minimap2::Strand::Forward));
             let mut match_patterns: HashMap<String, Arc<String>> = HashMap::new();
             let region2motif = single_seq_hp_tr_finder(&HP_REG, &mut match_patterns, target_substr);
 
             for v in region2motif.iter() {
                 let (start, end) = (v.0.0, v.0.1);
-                // println!("interest_region_start_end:{}-{}, align_start_end:{}-{}", start, end, align_info.target_start, align_info.target_end);
                 if start < align_info.target_start as usize || end > align_info.target_end as usize
                 {
                     continue;
                 }
 
-                // println!("herr");
-
                 let motif = v.1.clone();
                 let target_base = motif.as_bytes()[1];
+                let expected_cnt = motif[3..].parse::<i32>().unwrap();
                 let mut pre_rpos = -1;
                 let mut aligned_pair_iter = Box::new(align_info.aligned_pairs().take_while(
                     |(_qpos, rpos, _align_op)| {
@@ -151,6 +144,7 @@ impl TMetric for HpMetricV2 {
 
                 let mut cnt = 0;
                 let mut is_misc = false;
+                
                 for (qpos, _rpos, _align_op) in aligned_pair_iter {
                     if let Some(qpos) = qpos {
                         cnt += if read_seq[qpos as usize] == target_base {
@@ -162,10 +156,29 @@ impl TMetric for HpMetricV2 {
                     }
                 }
 
+                if (cnt - expected_cnt).abs() >= 10 {
+                    let (aligned_target, aligned_query) =
+                        MappingExt(&align_info).aligned_2_str(target_substr.as_bytes(), read_seq);
+                    let aligned_len = align_info.query_end - align_info.query_start;
+                    tracing::warn!(
+                        "\n query_name:{}, motif:{}, baseCnt:{}, expectedCnt:{}, QueryStartEnd:{}-{}, TargetStartEnd:{}-{}\ntarget:{}\nquery :{}",
+                        read_info.name,
+                        motif,
+                        cnt,
+                        expected_cnt,
+                        old_align_info.query_start + align_info.query_start,
+                        old_align_info.query_start + align_info.query_start + aligned_len,
+                        old_align_info.target_start,
+                        old_align_info.target_end,
+                        aligned_target,
+                        aligned_query
+                    );
+                }
+
                 self.metric_core
                     .entry(motif.clone())
                     .or_default()
-                    .update(is_misc, cnt);
+                    .update(is_misc, cnt as usize);
             }
         }
     }

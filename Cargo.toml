@@ -1,6 +1,6 @@
 [package]
 name = "gsmm2-metric"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 description = "gsmm2 metric"
 license = "MIT"
@@ -17,3 +17,8 @@ gskits = "0.15.12"
 once_cell = "1"
 regex = "1"
 lazy_static = "1.5.0"
+tracing = "0.1.40"
+tracing-appender = "0.2.3"
+
+tracing-subscriber = {version="0.3.18", features=["json", "env-filter", "fmt", "time", "local-time"]}
+time = "0.3.34"
