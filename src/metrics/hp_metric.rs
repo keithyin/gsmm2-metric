@@ -11,7 +11,7 @@ use crate::{
 
 #[derive(Debug, Default)]
 struct Counter {
-    counts: [HashMap<usize, usize>; 2], // [non-misc, misc]
+    counts: [HashMap<usize, usize>; 2], // [pure, mixed]
 }
 
 impl Counter {
@@ -152,12 +152,12 @@ impl TMetric for HpMetric {
                         });
 
                         innner_items.push(if misc_idx == 0 {
-                            "non-misc".to_string()
+                            "pure".to_string()
                         } else {
-                            "misc".to_string()
+                            "mixed".to_string()
                         });
 
-                        innner_items.push(format!("={}", called));
+                        innner_items.push(format!("{}", called));
                         innner_items.push(format!("{}", num));
                         result_items.push(innner_items.join("\t"));
                     });
