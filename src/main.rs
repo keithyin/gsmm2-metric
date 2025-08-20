@@ -25,6 +25,7 @@ pub mod aligner;
 pub mod cli;
 pub mod global_data;
 pub mod metrics;
+pub mod msa;
 
 fn main() {
     let cli = Cli::parse();
