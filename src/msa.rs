@@ -191,7 +191,7 @@ fn draw_msa(
     let pb = get_bar_pb(
         format!("dumping msa result to {}", ofilename),
         DEFAULT_INTERVAL,
-        records.len(),
+        records.len() as u64,
     );
 
     for (record_idx, record) in records.iter().enumerate() {
