@@ -15,9 +15,8 @@ use crate::{
     cli::{Cli, MetricArgs, Mode},
     global_data::GlobalData,
     metrics::{
-        TMetric, hp_metric::HpMetric, hp_metric_v2::HpMetricV2, hp_tr_metric::HpTrMetric,
-        hp_tr_metric_v2::HpTrMetricV2,
-    },
+        hp_metric::HpMetric, hp_metric_v2::HpMetricV2, hp_tr_metric::HpTrMetric, hp_tr_metric_v2::HpTrMetricV2, TMetric
+    }, msa::msa_entrence,
 };
 
 pub mod aligned_pairs;
@@ -61,6 +60,10 @@ fn main() {
 
         Mode::HpV2 => {
             metric_entrance::<HpMetricV2>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
+        }
+
+        Mode::Bam2Msa => {
+            msa_entrence(&cli);
         }
     }
 }

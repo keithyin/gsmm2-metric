@@ -1,25 +1,43 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fs,
+    io::{BufWriter, Write},
+};
 
-use gskits::gsbam::bam_record_ext::BamRecordExt;
+use gskits::{
+    gsbam::bam_record_ext::BamRecordExt,
+    pbar::{DEFAULT_INTERVAL, get_bar_pb, get_spin_pb},
+};
 use ndarray::Array2;
 use rust_htslib::{
     self,
     bam::{Read, Record, ext::BamRecordExtensions},
 };
-pub fn msa_entrence() {
-    let filepath = "";
-    let mut reader = rust_htslib::bam::Reader::from_path(filepath).unwrap();
-    reader.set_threads(100).unwrap();
 
+use crate::cli::Cli;
+pub fn msa_entrence(cli: &Cli) {
+    let filepath = cli.metric_args.io_args.query[0].clone();
+    let mut reader = rust_htslib::bam::Reader::from_path(&filepath).unwrap();
+    reader
+        .set_threads(cli.threads.unwrap_or(num_cpus::get()))
+        .unwrap();
+    let output_filepath = cli.metric_args.get_oup_file(cli.mode);
+
+    let pb = get_spin_pb(format!("reading {}", filepath), DEFAULT_INTERVAL);
     let all_records = reader
         .records()
         .into_iter()
+        .map(|rec| {
+            pb.inc(1);
+            rec
+        })
         .filter(|rec| rec.is_ok())
         .map(|rec| rec.unwrap())
         .filter(|rec| !rec.is_unmapped())
         .filter(|rec| !rec.is_secondary())
         .filter(|rec| !rec.is_supplementary())
         .collect::<Vec<_>>();
+    pb.finish();
 
     let major_pos_ins = compute_max_ins_of_each_ref_position(&records, Some(0), rend);
 
@@ -56,19 +74,15 @@ pub fn msa_entrence() {
         .zip(major_start_point.into_iter())
         .collect::<HashMap<_, _>>();
 
-    let mut feature = ndarray::Array2::from_elem((major.len(), all_records.len()), '-');
-
-    fill_feature(
-        &mut feature,
+    let msa_len = major.len();
+    draw_msa(
         &all_records,
         0,
         rend.unwrap(),
         &major_pos2major_starting_point,
-        0,
-        DcFeatItem::Base,
-        0.0,
-    )
-    .with_context(|| format!("{}. fill base error. ", ori_feature.get_smc_name()))?;
+        msa_len,
+        &output_filepath,
+    );
 }
 
 fn compute_max_ins_of_each_ref_position(
@@ -80,6 +94,7 @@ fn compute_max_ins_of_each_ref_position(
 
     let rstart = rstart.map(|v| v as i64);
     let rend = rend.map(|v| v as i64);
+
     for record in records {
         // let query_locus_blacklist = get_query_locus_blacklist(record, query_locus_blacklist_gen);
 
@@ -153,30 +168,35 @@ fn compute_max_ins_of_each_ref_position(
                 cur_ins = 0;
             } else {
                 cur_ins += 1;
-                // let qpos_ = qpos.unwrap() as usize;
-                // cur_ins += if query_locus_blacklist.contains(&qpos_) {
-                //     0
-                // } else {
-                //     1
-                // };
             }
         }
-        // println!("");
     }
 
     pos2ins
 }
 
-fn fill_feature(
-    feature_matrix: &mut Array2<char>,
+fn draw_msa(
     records: &Vec<&Record>,
     rstart: usize,
     rend: usize,
     major_pos2major_starting_point: &HashMap<usize, usize>,
+    msa_len: usize,
+    ofilename: &str,
 ) {
-    let feature_shape = feature_matrix.shape();
-    let (max_tt, max_feat_size) = (feature_shape[0], feature_shape[1]);
+    let ofile = fs::File::create(ofilename).unwrap();
+    let mut writer = BufWriter::new(ofile);
+
+    let mut single_record_msa = vec!['-'; msa_len];
+
+    let pb = get_bar_pb(
+        format!("dumping msa result to {}", ofilename),
+        DEFAULT_INTERVAL,
+        records.len(),
+    );
+
     for (record_idx, record) in records.iter().enumerate() {
+        single_record_msa.fill('-');
+
         let record_ext = BamRecordExt::new(record);
         let rstart = record_ext.reference_start().max(rstart);
         let rend = record_ext.reference_end().min(rend);
@@ -224,8 +244,19 @@ fn fill_feature(
                 .unwrap()
                 + minor_cursor;
             if let Some(qpos_) = qpos {
-                feature_matrix[[tt, record_idx]] = query_seq_bytes[qpos_ as usize];
+                single_record_msa[tt] = query_seq_bytes[qpos_ as usize];
             }
         }
+
+        writeln!(&mut writer, ">{}", record.qname()).unwrap();
+        writeln!(
+            &mut writer,
+            "{}",
+            single_record_msa.iter().collect::<String>()
+        )
+        .unwrap();
+
+        pb.inc(1);
     }
+    pb.finish();
 }
