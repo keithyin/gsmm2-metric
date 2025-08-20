@@ -248,7 +248,7 @@ fn draw_msa(
             }
         }
 
-        writeln!(&mut writer, ">{}", record.qname()).unwrap();
+        writeln!(&mut writer, ">{}", record_ext.get_qname()).unwrap();
         writeln!(
             &mut writer,
             "{}",
