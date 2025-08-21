@@ -1,14 +1,15 @@
 use std::{
+    cmp,
     collections::HashMap,
     fs,
     io::{BufWriter, Write},
+    usize,
 };
 
 use gskits::{
     gsbam::bam_record_ext::BamRecordExt,
     pbar::{DEFAULT_INTERVAL, get_bar_pb, get_spin_pb},
 };
-use ndarray::Array2;
 use rust_htslib::{
     self,
     bam::{Read, Record, ext::BamRecordExtensions},
@@ -22,6 +23,9 @@ pub fn msa_entrence(cli: &Cli) {
         .set_threads(cli.threads.unwrap_or(num_cpus::get()))
         .unwrap();
     let output_filepath = cli.metric_args.get_oup_file(cli.mode);
+    let output_filepath = format!("{}.fasta", output_filepath.rsplit_once(".").unwrap().0);
+
+    let shannon_entroy_output_filepath = format!("{}.shannon.txt", output_filepath);
 
     let pb = get_spin_pb(format!("reading {}", filepath), DEFAULT_INTERVAL);
     let all_records = reader
@@ -39,7 +43,7 @@ pub fn msa_entrence(cli: &Cli) {
         .collect::<Vec<_>>();
     pb.finish();
 
-    let major_pos_ins = compute_max_ins_of_each_ref_position(&records, Some(0), rend);
+    let major_pos_ins = compute_max_ins_of_each_ref_position(&all_records, Some(0), None);
 
     // println!("major_pos_ins:{:?}", major_pos_ins);
 
@@ -53,10 +57,6 @@ pub fn msa_entrence(cli: &Cli) {
     let major = major_pos_ins_vec
         .iter()
         .flat_map(|&(major_pos, ins_size)| vec![major_pos; ins_size + 1].into_iter())
-        .collect::<Vec<_>>();
-    let minor = major_pos_ins_vec
-        .iter()
-        .flat_map(|&(_, ins_size)| (0..(ins_size + 1)).into_iter())
         .collect::<Vec<_>>();
 
     let mut cursor = 0;
@@ -78,10 +78,11 @@ pub fn msa_entrence(cli: &Cli) {
     draw_msa(
         &all_records,
         0,
-        rend.unwrap(),
+        usize::MAX,
         &major_pos2major_starting_point,
         msa_len,
         &output_filepath,
+        &shannon_entroy_output_filepath,
     );
 }
 
@@ -175,14 +176,55 @@ fn compute_max_ins_of_each_ref_position(
     pos2ins
 }
 
+#[derive(Debug, Clone)]
+struct LocusBaseCounter {
+    counter: HashMap<char, usize>,
+}
+impl Default for LocusBaseCounter {
+    fn default() -> Self {
+        let mut counter = HashMap::new();
+        counter.insert('-', 0);
+        counter.insert('A', 0);
+        counter.insert('C', 0);
+        counter.insert('G', 0);
+        counter.insert('T', 0);
+        Self { counter }
+    }
+}
+
+impl LocusBaseCounter {
+    fn shanon_entropy(&self) -> f32 {
+        let mut total_count = 0;
+        for &count in self.counter.values() {
+            total_count += count;
+        }
+
+        if total_count == 0 {
+            return 0.0;
+        }
+
+        let mut entropy = 0.0;
+        for &count in self.counter.values() {
+            if count > 0 {
+                let p = count as f32 / total_count as f32;
+                entropy -= p * p.log2();
+            }
+        }
+        entropy
+    }
+}
+
 fn draw_msa(
-    records: &Vec<&Record>,
+    records: &Vec<Record>,
     rstart: usize,
     rend: usize,
     major_pos2major_starting_point: &HashMap<usize, usize>,
     msa_len: usize,
     ofilename: &str,
+    shann_entropy_ofilename: &str,
 ) {
+    let mut all_locus_base_counter = vec![LocusBaseCounter::default(); msa_len];
+
     let ofile = fs::File::create(ofilename).unwrap();
     let mut writer = BufWriter::new(ofile);
 
@@ -194,7 +236,7 @@ fn draw_msa(
         records.len() as u64,
     );
 
-    for (record_idx, record) in records.iter().enumerate() {
+    for record in records.iter() {
         single_record_msa.fill('-');
 
         let record_ext = BamRecordExt::new(record);
@@ -206,8 +248,7 @@ fn draw_msa(
         let mut qpos_cursor = None;
         let mut rpos_cursor = None;
 
-        let mut query_seq = record_ext.get_seq();
-        let seq_len = query_seq.len();
+        let query_seq = record_ext.get_seq();
 
         let query_seq_bytes = query_seq.chars().collect::<Vec<_>>();
         let mut minor_cursor = 0;
@@ -248,6 +289,13 @@ fn draw_msa(
             }
         }
 
+        single_record_msa
+            .iter()
+            .zip(all_locus_base_counter.iter_mut())
+            .for_each(|(&base, base_counter)| {
+                base_counter.counter.entry(base).and_modify(|cnt| *cnt += 1);
+            });
+
         writeln!(&mut writer, ">{}", record_ext.get_qname()).unwrap();
         writeln!(
             &mut writer,
@@ -259,4 +307,13 @@ fn draw_msa(
         pb.inc(1);
     }
     pb.finish();
+
+    let entropy_str = all_locus_base_counter
+        .iter()
+        .map(|locus| locus.shanon_entropy().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let mut ofile = fs::File::create(shann_entropy_ofilename).unwrap();
+    ofile.write_all(entropy_str.as_bytes()).unwrap();
 }
