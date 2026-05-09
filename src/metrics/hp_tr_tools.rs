@@ -20,12 +20,34 @@ pub fn get_target_substr<'a>(
     target_fwd: &'a str,
     target_rev: &'a str,
 ) -> &'a str {
-    let (start, end) = get_target_start_end(ori_start, ori_end, target_fwd.len(), is_rev);
-    if is_rev {
-        &target_rev[start..end]
-    } else {
-        &target_fwd[start..end]
+    let (mut start, mut end) = get_target_start_end(ori_start, ori_end, target_fwd.len(), is_rev);
+
+    let ori_seq = if is_rev { target_rev } else { target_fwd };
+
+    let ori_seq_bytes = ori_seq.as_bytes();
+
+    // 如果 slice 边界落在了 homopolymer 内部，就持续收缩
+    if end < ori_seq.len() {
+        while end > start {
+            if ori_seq_bytes[end - 1] == ori_seq_bytes[end] {
+                end -= 1;
+            } else {
+                break;
+            }
+        }
     }
+
+    if start > 0 {
+        while start < end {
+            if ori_seq_bytes[start - 1] == ori_seq_bytes[start] {
+                start += 1
+            } else {
+                break;
+            }
+        }
+    }
+
+    &ori_seq[start..end]
 }
 
 pub fn do_align_4_homo(
