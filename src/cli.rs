@@ -64,6 +64,8 @@ pub enum Mode {
     Hp,
 
     HpV2,
+
+    Bam2Msa
 }
 
 #[derive(Debug, Args, Clone, Copy, Default)]

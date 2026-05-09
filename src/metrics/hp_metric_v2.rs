@@ -117,7 +117,16 @@ impl TMetric for HpMetricV2 {
             }
             let align_info = align_info.unwrap();
 
-            assert!(matches!(align_info.strand, mm2::minimap2::Strand::Forward));
+            if !matches!(align_info.strand, mm2::minimap2::Strand::Forward) {
+                tracing::warn!(
+                    "still reverse aligment. QueryName:{}. QueryStartEnd:{}-{}",
+                    read_info.name,
+                    old_align_info.query_start,
+                    old_align_info.query_end,
+                );
+                continue;
+            }
+
             let mut match_patterns: HashMap<String, Arc<String>> = HashMap::new();
             let region2motif = single_seq_hp_tr_finder(&HP_REG, &mut match_patterns, target_substr);
 
