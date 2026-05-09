@@ -28,8 +28,8 @@ pub fn get_target_substr<'a>(
 
     // 如果 slice 边界落在了 homopolymer 内部，就持续收缩
     if end < ori_seq.len() {
-        while end > start {
-            if ori_seq_bytes[end - 1] == ori_seq_bytes[end] {
+        while end > start && end >= 2 {
+            if ori_seq_bytes[end - 2] == ori_seq_bytes[end - 1] {
                 end -= 1;
             } else {
                 break;
