@@ -1,5 +1,6 @@
 use std::{collections::HashMap, i64, sync::Arc};
 
+use gskits::dna::reverse_complement;
 use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
 use mm2::{mapping_ext::MappingExt, minimap2::Mapping};
 use regex::Regex;
@@ -68,7 +69,7 @@ impl TMetric for HpMetricV2 {
     fn get_global_data(&self) -> &GlobalData {
         self.global_data.as_ref().unwrap()
     }
-    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo) {
+    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo, reference_anchored: bool) {
         if self.align_infos.is_empty() {
             return;
         }
@@ -86,7 +87,7 @@ impl TMetric for HpMetricV2 {
         // let read_seq = read_info.seq.as_bytes();
 
         for old_align_info in &self.align_infos {
-            let read_seq = &read_info.seq.as_bytes()
+            let read_seq = &read_info.seq
                 [old_align_info.query_start as usize..old_align_info.query_end as usize];
 
             let target_substr = get_target_substr(
@@ -97,12 +98,20 @@ impl TMetric for HpMetricV2 {
                 target_seq_rev,
             );
 
-            let align_info = do_align_4_homo(
-                &read_info.seq,
-                old_align_info.query_start as usize,
-                old_align_info.query_end as usize,
-                target_substr,
-            );
+            let (read_seq, target_substr) = if old_align_info.is_reverse() && reference_anchored {
+                let read_rev = reverse_complement(read_seq.as_bytes());
+                let read_rev = String::from_utf8(read_rev).unwrap();
+                let target_rev = reverse_complement(target_substr.as_bytes());
+                let target_rev = String::from_utf8(target_rev).unwrap();
+                (read_rev, target_rev)
+            } else {
+                (read_seq.to_string(), target_substr.to_string())
+            };
+
+            let (read_seq, target_substr) = (&read_seq, &target_substr);
+            let read_seq_bytes = read_seq.as_bytes();
+
+            let align_info = do_align_4_homo(read_seq, target_substr);
             if align_info.is_none() {
                 tracing::warn!(
                     "no aligned result. QueryName:{}. QueryStartEnd:{}-{}, TargetStartEnd:{}-{}, strand:{:?}",
@@ -165,18 +174,18 @@ impl TMetric for HpMetricV2 {
 
                 for (qpos, _rpos, _align_op) in aligned_pair_iter {
                     if let Some(qpos) = qpos {
-                        cnt += if read_seq[qpos as usize] == target_base {
+                        cnt += if read_seq_bytes[qpos as usize] == target_base {
                             1
                         } else {
                             0
                         };
-                        is_misc |= read_seq[qpos as usize] != target_base;
+                        is_misc |= read_seq_bytes[qpos as usize] != target_base;
                     }
                 }
 
                 if (cnt - expected_cnt).abs() >= 10 {
-                    let (aligned_target, aligned_query) =
-                        MappingExt(&align_info).aligned_2_str(target_substr.as_bytes(), read_seq);
+                    let (aligned_target, aligned_query) = MappingExt(&align_info)
+                        .aligned_2_str(target_substr.as_bytes(), read_seq_bytes);
                     let aligned_len = align_info.query_end - align_info.query_start;
                     tracing::warn!(
                         "\n query_name:{}, motif:{}, baseCnt:{}, expectedCnt:{}, QueryStartEnd:{}-{}, TargetStartEnd:{}-{}\ntarget:{}\nquery :{}",
@@ -335,7 +344,7 @@ mod test {
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
         metric.set_mappings(hits);
-        metric.compute_metric(&fwd_query_record);
+        metric.compute_metric(&fwd_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
 
@@ -363,7 +372,7 @@ mod test {
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
         metric.set_mappings(hits);
-        metric.compute_metric(&rev_query_record);
+        metric.compute_metric(&rev_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
     }
@@ -445,7 +454,7 @@ mod test {
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
         metric.set_mappings(hits);
-        metric.compute_metric(&fwd_query_record);
+        metric.compute_metric(&fwd_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
 

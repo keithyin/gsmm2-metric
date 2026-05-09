@@ -16,7 +16,7 @@ pub trait TMetric: Send + 'static + Default {
 
     fn set_global_data(&mut self, global_data: Arc<GlobalData>);
     fn get_global_data(&self) -> &GlobalData;
-    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo);
+    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo, reference_anchored: bool);
 
     fn build_metric_str(&mut self) -> String;
     fn set_target_name(&mut self, target_name: Arc<String>);

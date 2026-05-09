@@ -52,8 +52,6 @@ pub fn get_target_substr<'a>(
 
 pub fn do_align_4_homo(
     ori_query_seq: &str,
-    qstart: usize,
-    qend: usize,
     target_substr: &str,
 ) -> Option<Mapping> {
     let mut aligner = Aligner::builder()
@@ -78,7 +76,7 @@ pub fn do_align_4_homo(
         .unwrap();
     let mut hits = aligner
         .map(
-            ori_query_seq[qstart..qend].as_bytes(),
+            ori_query_seq.as_bytes(),
             false,
             false,
             None,

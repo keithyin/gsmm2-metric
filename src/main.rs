@@ -80,6 +80,9 @@ where
     let global_data = Arc::new(GlobalData::new(targetname2seq));
 
     let oup_params = args.oup_args.to_oup_params();
+
+    let ref_anchored = args.oup_args.reference_anchored;
+
     let inp_filter_params = args.io_args.to_input_filter_params();
     thread::scope(|thread_scope| {
         let aligners = &aligners;
@@ -110,6 +113,7 @@ where
                         global_data_,
                         aligners,
                         oup_params,
+                        ref_anchored
                     );
                 }
             });
@@ -127,6 +131,7 @@ pub fn compute_metric_worker<M>(
     global_data: Arc<GlobalData>,
     aligners: &Vec<mm2::NoMemLeakAligner>,
     oup_params: &mm2::params::OupParams,
+    ref_anchored: bool
 ) where
     M: TMetric,
 {
@@ -138,6 +143,7 @@ pub fn compute_metric_worker<M>(
                 &query_record,
                 oup_params,
                 global_data.clone(),
+                ref_anchored
             ))
             .unwrap();
     }
@@ -148,6 +154,7 @@ pub fn compute_metric<M>(
     read_info: &mm2::gskits::ds::ReadInfo,
     oup_params: &mm2::params::OupParams,
     global_data: Arc<GlobalData>,
+    ref_anchored: bool
 ) -> M
 where
     M: TMetric,
@@ -182,7 +189,7 @@ where
 
     metric.set_global_data(global_data);
     metric.set_mappings(hits);
-    metric.compute_metric(&read_info);
+    metric.compute_metric(&read_info, ref_anchored);
     metric.set_metric_str();
     metric
 }

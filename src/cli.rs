@@ -13,7 +13,7 @@ pub struct Cli {
         help="read https://lh3.github.io/minimap2/minimap2.html for more details")]
     pub preset: String,
 
-    #[arg(value_enum, long="mode")]
+    #[arg(value_enum, long = "mode")]
     pub mode: Mode,
 
     #[arg(
@@ -65,7 +65,7 @@ pub enum Mode {
 
     HpV2,
 
-    Bam2Msa
+    Bam2Msa,
 }
 
 #[derive(Debug, Args, Clone, Copy, Default)]
@@ -271,6 +271,9 @@ pub struct OupArgs {
         help = "discard multi-mapping reads, only keep the unique mapping reads for metric"
     )]
     pub discard_multi_mapping_reads: bool,
+
+    #[arg(long = "refAnchored", help = "reference anchored")]
+    pub reference_anchored: bool,
 }
 
 impl OupArgs {

@@ -82,7 +82,7 @@ impl TMetric for HpTrMetricV2 {
     fn get_global_data(&self) -> &GlobalData {
         self.global_data.as_ref().unwrap()
     }
-    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo) {
+    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo, reference_anchored: bool) {
         if self.align_infos.is_empty() {
             return;
         }
@@ -108,9 +108,8 @@ impl TMetric for HpTrMetricV2 {
             );
 
             let align_info = do_align_4_homo(
-                &read_info.seq,
-                old_align_info.query_start as usize,
-                old_align_info.query_end as usize,
+                &read_info.seq
+                    [old_align_info.query_start as usize..old_align_info.query_end as usize],
                 target_substr,
             );
             if align_info.is_none() {
@@ -305,7 +304,7 @@ mod test {
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
         metric.set_mappings(hits);
-        metric.compute_metric(&fwd_query_record);
+        metric.compute_metric(&fwd_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
 
@@ -333,7 +332,7 @@ mod test {
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
         metric.set_mappings(hits);
-        metric.compute_metric(&rev_query_record);
+        metric.compute_metric(&rev_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
     }

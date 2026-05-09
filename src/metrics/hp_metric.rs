@@ -58,7 +58,7 @@ impl TMetric for HpMetric {
     fn get_global_data(&self) -> &GlobalData {
         self.global_data.as_ref().unwrap()
     }
-    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo) {
+    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo, reference_anchored: bool) {
         if self.align_infos.is_empty() {
             return;
         }
@@ -292,7 +292,7 @@ mod test {
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
         metric.set_mappings(hits);
-        metric.compute_metric(&fwd_query_record);
+        metric.compute_metric(&fwd_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
 
@@ -320,7 +320,7 @@ mod test {
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
         metric.set_mappings(hits);
-        metric.compute_metric(&rev_query_record);
+        metric.compute_metric(&rev_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
     }
@@ -401,7 +401,7 @@ mod test {
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
         metric.set_mappings(hits);
-        metric.compute_metric(&fwd_query_record);
+        metric.compute_metric(&fwd_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
 
