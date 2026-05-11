@@ -37,23 +37,18 @@ pub fn get_target_substr<'a>(
         }
     }
 
-    if start > 0 {
-        while start < end {
-            if ori_seq_bytes[start - 1] == ori_seq_bytes[start] {
-                start += 1
-            } else {
-                break;
-            }
+    while start < end {
+        if ori_seq_bytes[start] == ori_seq_bytes[start + 1] {
+            start += 1
+        } else {
+            break;
         }
     }
 
     &ori_seq[start..end]
 }
 
-pub fn do_align_4_homo(
-    ori_query_seq: &str,
-    target_substr: &str,
-) -> Option<Mapping> {
+pub fn do_align_4_homo(ori_query_seq: &str, target_substr: &str) -> Option<Mapping> {
     let mut aligner = Aligner::builder()
         .map_ont()
         .with_cigar() // cigar_str has bug in minimap2="0.1.20+minimap2.2.28"

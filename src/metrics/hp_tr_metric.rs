@@ -67,7 +67,7 @@ impl TMetric for HpTrMetric {
     fn get_global_data(&self) -> &GlobalData {
         self.global_data.as_ref().unwrap()
     }
-    fn compute_metric(&mut self, _read_info: &mm2::gskits::ds::ReadInfo, reference_anchored: bool) {
+    fn compute_metric(&mut self, _read_info: &mm2::gskits::ds::ReadInfo, _reference_anchored: bool) {
         if self.align_infos.is_empty() {
             return;
         }
