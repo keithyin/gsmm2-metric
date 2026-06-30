@@ -30,14 +30,14 @@ impl Counter {
 struct CounterWithAlignSpan {
     counts: [HashMap<usize, usize>; 2], // [pure, mixed]
     align_span: usize,
-    matched: usize,
+    eq: usize,
 }
 
 impl CounterWithAlignSpan {
-    pub fn update(&mut self, misc: bool, cnt: usize, align_span: usize) {
+    pub fn update(&mut self, misc: bool, cnt: usize, eq: usize, align_span: usize) {
         let idx = if misc { 1 } else { 0 };
         *self.counts[idx].entry(cnt).or_default() += 1;
-        self.matched += cnt;
+        self.eq += eq;
         self.align_span += align_span;
     }
 }
@@ -68,7 +68,7 @@ impl TMetric for HpMetricV2 {
             "tag".to_string(),
             "called".to_string(),
             "num".to_string(),
-            "matched".to_string(),
+            "eq".to_string(),
             "alignspan".to_string(),
         ];
         csv_header.join("\t")
@@ -189,9 +189,16 @@ impl TMetric for HpMetricV2 {
 
                 let mut cnt = 0;
                 let mut is_misc = false;
+                let mut eq = 0;
 
                 let mut align_span = 0;
                 for (qpos, _rpos, _align_op) in aligned_pair_iter {
+                    if let (Some(qpos_), Some(_rpos_)) = (qpos, _rpos) {
+                        if read_seq_bytes[qpos_ as usize] == target_base {
+                            eq += 1;
+                        }
+                    }
+
                     if let Some(qpos) = qpos {
                         cnt += if read_seq_bytes[qpos as usize] == target_base {
                             1
@@ -225,6 +232,7 @@ impl TMetric for HpMetricV2 {
                 self.metric_core.entry(motif.clone()).or_default().update(
                     is_misc,
                     cnt as usize,
+                    eq,
                     align_span,
                 );
             }
@@ -249,7 +257,7 @@ impl TMetric for HpMetricV2 {
 
                     innner_items.push(format!("{}", called));
                     innner_items.push(format!("{}", num));
-                    innner_items.push(format!("{}", counter.matched));
+                    innner_items.push(format!("{}", counter.eq));
                     innner_items.push(format!("{}", counter.align_span));
                     result_items.push(innner_items.join("\t"));
                 });
