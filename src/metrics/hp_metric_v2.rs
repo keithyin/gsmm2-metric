@@ -26,6 +26,22 @@ impl Counter {
     }
 }
 
+#[derive(Debug, Default)]
+struct CounterWithAlignSpan {
+    counts: [HashMap<usize, usize>; 2], // [pure, mixed]
+    align_span: usize,
+    matched: usize,
+}
+
+impl CounterWithAlignSpan {
+    pub fn update(&mut self, misc: bool, cnt: usize, align_span: usize) {
+        let idx = if misc { 1 } else { 0 };
+        *self.counts[idx].entry(cnt).or_default() += 1;
+        self.matched += cnt;
+        self.align_span += align_span;
+    }
+}
+
 lazy_static::lazy_static! {
     static ref HP_REG: Vec<HashMap<String, Regex>> = {
         vec![UnitAndRepeats::new(1, 3).build_finder_regrex()]
@@ -39,7 +55,7 @@ pub struct HpMetricV2 {
     global_data: Option<Arc<GlobalData>>,
     align_infos: Vec<Mapping>,
     //Arc<String> for motif string. [fwd_counter, rev_counter]
-    metric_core: HashMap<Arc<String>, Counter>,
+    metric_core: HashMap<Arc<String>, CounterWithAlignSpan>,
     metric_str: Option<String>,
 }
 
@@ -52,6 +68,8 @@ impl TMetric for HpMetricV2 {
             "tag".to_string(),
             "called".to_string(),
             "num".to_string(),
+            "matched".to_string(),
+            "alignspan".to_string(),
         ];
         csv_header.join("\t")
     }
@@ -172,6 +190,7 @@ impl TMetric for HpMetricV2 {
                 let mut cnt = 0;
                 let mut is_misc = false;
 
+                let mut align_span = 0;
                 for (qpos, _rpos, _align_op) in aligned_pair_iter {
                     if let Some(qpos) = qpos {
                         cnt += if read_seq_bytes[qpos as usize] == target_base {
@@ -181,6 +200,7 @@ impl TMetric for HpMetricV2 {
                         };
                         is_misc |= read_seq_bytes[qpos as usize] != target_base;
                     }
+                    align_span += 1;
                 }
 
                 if (cnt - expected_cnt).abs() >= 10 {
@@ -202,10 +222,11 @@ impl TMetric for HpMetricV2 {
                     );
                 }
 
-                self.metric_core
-                    .entry(motif.clone())
-                    .or_default()
-                    .update(is_misc, cnt as usize);
+                self.metric_core.entry(motif.clone()).or_default().update(
+                    is_misc,
+                    cnt as usize,
+                    align_span,
+                );
             }
         }
     }
@@ -228,6 +249,8 @@ impl TMetric for HpMetricV2 {
 
                     innner_items.push(format!("{}", called));
                     innner_items.push(format!("{}", num));
+                    innner_items.push(format!("{}", counter.matched));
+                    innner_items.push(format!("{}", counter.align_span));
                     result_items.push(innner_items.join("\t"));
                 });
             }
