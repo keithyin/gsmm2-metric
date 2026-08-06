@@ -3,6 +3,8 @@ use hp_tr_finder::{UnitAndRepeats, all_seq_hp_tr_finder};
 use once_cell::sync;
 use std::{collections::HashMap, sync::Arc};
 
+use crate::metrics::hp_tr_metric_v2::HP_TR_REG;
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GlobalDataKey {
     TargetName2Seq,
@@ -97,19 +99,10 @@ impl GlobalData {
 
             GlobalDataValue::TargetRegion2Motif4HpTr(target_region2motif) => {
                 target_region2motif.get_or_init(|| {
-                    let all_regs = vec![
-                        UnitAndRepeats::new(1, 3).build_finder_regrex(),
-                        UnitAndRepeats::new(2, 3).build_finder_regrex(),
-                        UnitAndRepeats::new(3, 3).build_finder_regrex(),
-                        UnitAndRepeats::new(4, 3).build_finder_regrex(),
-                    ];
-
-                    // let targetname2seq = self.target_name2seq.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-
                     let region2motif: HashMap<
                         Arc<String>,
                         Arc<HashMap<usize, Vec<((usize, usize), Arc<String>)>>>,
-                    > = all_seq_hp_tr_finder(&all_regs, &self.target_name2seq)
+                    > = all_seq_hp_tr_finder(&HP_TR_REG, &self.target_name2seq)
                         .into_iter()
                         .map(|(seqname, region2motif)| (seqname, Arc::new(region2motif.flatten())))
                         .collect::<HashMap<_, _>>();

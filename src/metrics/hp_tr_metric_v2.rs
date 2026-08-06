@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, panic, sync::Arc};
 
 use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
 use mm2::minimap2::Mapping;
@@ -34,7 +34,7 @@ impl AlignCounter {
 }
 
 lazy_static::lazy_static! {
-    static ref HP_TR_REG: Vec<HashMap<String, Regex>> = {
+    pub static ref HP_TR_REG: Vec<HashMap<String, Regex>> = {
         vec![
             UnitAndRepeats::new(1, 3).build_finder_regrex(),
             UnitAndRepeats::new(2, 3).build_finder_regrex(),
@@ -98,10 +98,34 @@ impl TMetric for HpTrMetricV2 {
             _ => panic!(""),
         };
 
+        let target_region_2_motif_all = match global_data_value {
+            GlobalDataValue::TargetRegion2Motif4HpTr(v) => {
+                v.get().unwrap().get(target_name).unwrap()
+            }
+            _ => panic!(""),
+        };
+
         for old_align_info in &self.align_infos {
+            let mut old_target_start = old_align_info.target_start as usize;
+            let mut old_target_end = old_align_info.target_end as usize;
+            // 如果比对的 reference_start, reference_end 正好处于 hp-str 区域的中心位置，那就从两头往中间缩
+            if let Some(regions) = target_region_2_motif_all.get(&old_target_start) {
+                let new_start = regions.iter().max_by_key(|v| v.0.1).unwrap().0.1;
+                tracing::info!("old_target_start: {old_target_start} -> {new_start}");
+                old_target_start = new_start;
+            }
+            if old_target_end == 0 {
+                tracing::warn!("aligned target end is zero.");
+                continue;
+            }
+            if let Some(regions) = target_region_2_motif_all.get(&(old_target_end - 1)) {
+                let new_end = regions.iter().min_by_key(|v| v.0.0).unwrap().0.0;
+                tracing::info!("old_target_end: {old_target_end} -> {new_end}");
+                old_target_end = new_end;
+            }
             let target_substr = get_target_substr(
-                old_align_info.target_start as usize,
-                old_align_info.target_end as usize,
+                old_target_start,
+                old_target_end as usize,
                 old_align_info.is_reverse(),
                 target_seq_fwd,
                 target_seq_rev,
