@@ -15,8 +15,10 @@ use crate::{
     cli::{Cli, MetricArgs, Mode},
     global_data::GlobalData,
     metrics::{
-        hp_metric::HpMetric, hp_metric_v2::HpMetricV2, hp_tr_metric::HpTrMetric, hp_tr_metric_v2::HpTrMetricV2, TMetric
-    }, msa::msa_entrence,
+        TMetric, hp_metric::HpMetric, hp_metric_v2::HpMetricV2, hp_tr_metric::HpTrMetric,
+        hp_tr_metric_v2::HpTrMetricV2,
+    },
+    msa::msa_entrence,
 };
 
 pub mod aligned_pairs;
@@ -48,14 +50,8 @@ fn main() {
         .init();
 
     match cli.mode {
-        Mode::HpTr => {
-            metric_entrance::<HpTrMetric>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
-        }
         Mode::HpTrV2 => {
             metric_entrance::<HpTrMetricV2>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
-        }
-        Mode::Hp => {
-            metric_entrance::<HpMetric>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
         }
 
         Mode::HpV2 => {
@@ -64,6 +60,11 @@ fn main() {
 
         Mode::Bam2Msa => {
             msa_entrence(&cli);
+        }
+
+        _ => {
+            tracing::error!("not a valid mode. only hp-v2, hp-tr-v2 is available");
+            std::process::exit(1);
         }
     }
 }
@@ -113,7 +114,7 @@ where
                         global_data_,
                         aligners,
                         oup_params,
-                        ref_anchored
+                        ref_anchored,
                     );
                 }
             });
@@ -131,7 +132,7 @@ pub fn compute_metric_worker<M>(
     global_data: Arc<GlobalData>,
     aligners: &Vec<mm2::NoMemLeakAligner>,
     oup_params: &mm2::params::OupParams,
-    ref_anchored: bool
+    ref_anchored: bool,
 ) where
     M: TMetric,
 {
@@ -143,7 +144,7 @@ pub fn compute_metric_worker<M>(
                 &query_record,
                 oup_params,
                 global_data.clone(),
-                ref_anchored
+                ref_anchored,
             ))
             .unwrap();
     }
@@ -154,7 +155,7 @@ pub fn compute_metric<M>(
     read_info: &mm2::gskits::ds::ReadInfo,
     oup_params: &mm2::params::OupParams,
     global_data: Arc<GlobalData>,
-    ref_anchored: bool
+    ref_anchored: bool,
 ) -> M
 where
     M: TMetric,
