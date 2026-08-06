@@ -11,7 +11,7 @@ exclude = ["test_data/*"]
 clap = { version = "4.4", features = ["derive"] }
 mm2 = "0.25.4"
 num_cpus = "1.16"
-hp_tr_finder = "0.3.0"
+hp_tr_finder = "0.4.0"
 crossbeam = "0.8"
 gskits = "0.15.12"
 once_cell = "1"

@@ -99,11 +99,16 @@ impl TMetric for HpTrMetricV2 {
             _ => panic!(""),
         };
 
+        let global_data_value = self
+            .global_data
+            .as_ref()
+            .unwrap()
+            .get(GlobalDataKey::TargetRegion2Motif4HpTr);
         let target_region_2_motif_all = match global_data_value {
             GlobalDataValue::TargetRegion2Motif4HpTr(v) => {
                 v.get().unwrap().get(target_name).unwrap()
             }
-            _ => panic!(""),
+            _ => panic!("TargetRegion2Motif4HpTr not found"),
         };
 
         for old_align_info in &self.align_infos {
@@ -132,8 +137,8 @@ impl TMetric for HpTrMetricV2 {
                 target_seq_rev,
             );
 
-            let read_seq =
-                &read_info.seq[old_align_info.query_start as usize..old_align_info.query_end as usize];
+            let read_seq = &read_info.seq
+                [old_align_info.query_start as usize..old_align_info.query_end as usize];
 
             let (read_seq, target_substr) = if old_align_info.is_reverse() && reference_anchored {
                 let read_rev = reverse_complement(read_seq.as_bytes());

@@ -734,7 +734,7 @@ dependencies = [
  "clap",
  "crossbeam",
  "gskits",
- "hp_tr_finder 0.3.0",
+ "hp_tr_finder 0.4.0",
  "lazy_static",
  "mm2",
  "ndarray 0.16.1",
@@ -793,9 +793,9 @@ dependencies = [
 
 [[package]]
 name = "hp_tr_finder"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b21c5a9a0b0040354400e7af660f1049aea9ba5c096239469de1ad77334638f2"
+checksum = "0e77b7ad9b98c5766af6e1339859c0fcaf39bb5509266fbec9fcd21b611b4ba1"
 dependencies = [
  "intervaltree",
  "regex",
