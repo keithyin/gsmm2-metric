@@ -1,5 +1,6 @@
 use std::{collections::HashMap, panic, sync::Arc};
 
+use gskits::dna::reverse_complement;
 use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
 use mm2::minimap2::Mapping;
 use regex::Regex;
@@ -82,7 +83,7 @@ impl TMetric for HpTrMetricV2 {
     fn get_global_data(&self) -> &GlobalData {
         self.global_data.as_ref().unwrap()
     }
-    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo, _reference_anchored: bool) {
+    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo, reference_anchored: bool) {
         if self.align_infos.is_empty() {
             return;
         }
@@ -131,11 +132,22 @@ impl TMetric for HpTrMetricV2 {
                 target_seq_rev,
             );
 
-            let align_info = do_align_4_homo(
-                &read_info.seq
-                    [old_align_info.query_start as usize..old_align_info.query_end as usize],
-                target_substr,
-            );
+            let read_seq =
+                &read_info.seq[old_align_info.query_start as usize..old_align_info.query_end as usize];
+
+            let (read_seq, target_substr) = if old_align_info.is_reverse() && reference_anchored {
+                let read_rev = reverse_complement(read_seq.as_bytes());
+                let read_rev = String::from_utf8(read_rev).unwrap();
+                let target_rev = reverse_complement(target_substr.as_bytes());
+                let target_rev = String::from_utf8(target_rev).unwrap();
+                (read_rev, target_rev)
+            } else {
+                (read_seq.to_string(), target_substr.to_string())
+            };
+
+            let (read_seq, target_substr) = (&read_seq, &target_substr);
+
+            let align_info = do_align_4_homo(read_seq, target_substr);
             if align_info.is_none() {
                 tracing::warn!(
                     "no aligned result. QueryName:{}. QueryStartEnd:{}-{}, TargetStartEnd:{}-{}, strand:{:?}",
