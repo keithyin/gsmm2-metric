@@ -60,6 +60,9 @@ pub enum Mode {
 
     HpTrV2,
 
+    /// homopolymer and tandem repeats, repeats distribution
+    HpTrV3,
+
     /// homopolymer only
     Hp,
 

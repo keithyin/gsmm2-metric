@@ -16,7 +16,7 @@ use crate::{
     global_data::GlobalData,
     metrics::{
         TMetric, hp_metric::HpMetric, hp_metric_v2::HpMetricV2, hp_tr_metric::HpTrMetric,
-        hp_tr_metric_v2::HpTrMetricV2,
+        hp_tr_metric_v2::HpTrMetricV2, hp_tr_metric_v3::HpTrMetricV3,
     },
     msa::msa_entrence,
 };
@@ -52,6 +52,10 @@ fn main() {
     match cli.mode {
         Mode::HpTrV2 => {
             metric_entrance::<HpTrMetricV2>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
+        }
+
+        Mode::HpTrV3 => {
+            metric_entrance::<HpTrMetricV3>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
         }
 
         Mode::HpV2 => {
