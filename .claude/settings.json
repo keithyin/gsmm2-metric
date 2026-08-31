@@ -2,7 +2,19 @@
   "permissions": {
     "allow": [
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(grep -rn \"single_seq_hp_tr_finder\" --include=*.rs . ~/projects 2>/dev/null | head -30; echo ---; ls /root/projects | head -30)",
+      "Read(//root/projects/**)",
+      "Bash(grep -rn \"hp_tr_finder\" Cargo.toml; echo ---; grep -rn \"hp_tr_finder\\\\|gsmm2-metric\" ~/.cargo/config.toml 2>/dev/null | head)",
+      "Read(//root/.cargo/**)",
+      "Read(//root/.cargo/registry/src/**)",
+      "Bash(grep -rn \"flatten\" -B 15 -A 25 /root/.cargo/registry/src/*/hp_tr_finder-0.4.0/src/lib.rs | head -80)",
+      "Bash(git -C /root/projects/gsmm2-metric log --oneline -8)",
+      "Read(//tmp/mtest/**)",
+      "Bash(/root/projects/gsmm2-metric/target/release/gsmm2-metric --mode hp-tr-v2 --threads 10 -q q.fa -t /root/projects/gsmm2-metric/test_data/ref_Saureus_ATCC25923.m.new.corrected.fasta --out v2.csv)",
+      "Bash(/root/projects/gsmm2-metric/target/release/gsmm2-metric --mode hp-v2 --threads 10 -q q.fa -t /root/projects/gsmm2-metric/test_data/ref_Saureus_ATCC25923.m.new.corrected.fasta --out hpv2.csv)",
+      "Bash(cd /tmp/mtest && python3 -c \" *)",
+      "Bash(cd /tmp/mtest && grep -P \"^read_ref\\\\t.*\\\\\\(T\\\\\\)3\\\\t\" v3.csv; echo \"--- sum num:\"; grep -P \"^read_ref\\\\t.*\\\\\\(T\\\\\\)3\\\\t\" v3.csv | awk -F'\\\\t' '{s+=$7} END {print s}'; echo \"--- v2 row:\"; grep -P \"^read_ref\\\\t.*\\\\\\(T\\\\\\)3\\\\t\" v2.csv)"
     ]
   }
 }
