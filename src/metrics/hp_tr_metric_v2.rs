@@ -271,7 +271,7 @@ mod test {
 
     use crate::{
         global_data::GlobalData,
-        metrics::{TMetric, hp_tr_metric::HpTrMetric},
+        metrics::{TMetric, hp_tr_metric_v2::HpTrMetricV2},
     };
 
     #[test]
@@ -345,7 +345,7 @@ mod test {
             println!("");
         }
 
-        let mut metric = HpTrMetric::default();
+        let mut metric = HpTrMetricV2::default();
         metric.set_qname("query".to_string());
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());
@@ -373,7 +373,7 @@ mod test {
             println!("");
         }
 
-        let mut metric = HpTrMetric::default();
+        let mut metric = HpTrMetricV2::default();
         metric.set_qname("query".to_string());
         metric.set_target_name(Arc::new("target".to_string()));
         metric.set_global_data(global_data.clone());

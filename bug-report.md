@@ -1,6 +1,6 @@
 # gsmm2-metric Code Review — Bug Report
 
-Review 范围：`src/` 全部 13 个 Rust 文件（main.rs、cli.rs、aligner.rs、global_data.rs、aligned_pairs.rs、msa.rs、metrics/*），并交叉核对了依赖 `mm2 0.25.6`、`hp_tr_finder 0.4.0`、`minimap2 0.1.23+minimap2.2.28`、`rust-htslib 0.49.0` 的源码（Cargo.lock 锁定版本）。
+Review 范围：`src/` 全部 Rust 文件（main.rs、cli.rs、aligner.rs、global_data.rs、aligned_pairs.rs、msa.rs、metrics/*），并交叉核对了依赖 `mm2 0.25.6`、`hp_tr_finder 0.4.0`、`minimap2 0.1.23+minimap2.2.28`、`rust-htslib 0.49.0` 的源码（Cargo.lock 锁定版本）。注：报告撰写时为 13 个文件；2026-11-20 移除未接线的 v1 `hp_metric.rs` / `hp_tr_metric.rs` 后为 11 个，涉及条目已就地更新。
 
 验证情况：`cargo check --all-targets` 通过；其中 Bug #1 已用 release 二进制 + 最小输入实测复现。
 
@@ -204,9 +204,9 @@ let q_start = if start > ts {
 
 **修复情况（2026-11-20）**：已按第 9 节方案修复——`build_ref2qpos` 改为返回 `(Vec<usize>, Vec<bool>)`，每个分支同步写入 `is_deleted`（deletion=true，match/insertion=false，保持「最后写入者生效」语义）；q_start 按 `is_deleted[start-1-ts]` 分支取值。新增回归测试 `test_boundary_deletion_window`（两个 case：deletion 在 motif 起点前 1bp → called=4 pure；deletion 跨入 motif 起点 → called=4 pure），并更新 `test_build_ref2qpos` 断言。注意第二个 case 的实测发现：ref[172]='A' 与 motif 首碱基 ref[174]='A' 相同，deletion 落在 [172,173] 与 [173,174] 产出同一条 read（比对歧义），比对器选择 [172,173] 后 read 的 motif 内容仍是完整 `ACACACAC`，故正确期望为 called=4 pure——修复前后结果分别为 (4,pure) 与 (3,mixed)，仍能有效区分。`metrics::hp_tr_metric_v3` 全部 5 个单测通过；`cargo check --all-targets` 通过，warning 均为修复前已存在的。
 
-### Bug 5：hp-v2 / hp(v1) — 窗口两端对 insertion 的处理不对称（前算后不算）
+### Bug 5：hp-v2 — 窗口两端对 insertion 的处理不对称（前算后不算）—— ✅ 已修复
 
-- 位置：`src/metrics/hp_metric_v2.rs:171-211`、`src/metrics/hp_metric.rs:101-132`（两者是同一段拷贝逻辑）。
+- 位置：`src/metrics/hp_metric_v2.rs:171-211`。（撰写时的 v1 `src/metrics/hp_metric.rs:101-132` 是同一段拷贝逻辑，该文件已于 2026-11-20 随 v1 整体移除，本条现仅涉及 hp-v2。）
 
 机制：取窗口用 `skip_while(rpos != Some(start-1)).skip(1)` + `take_while((pre_rpos+1) < end)`：
 
@@ -216,6 +216,8 @@ let q_start = if start > ts {
 后果：同一条 read 在 HP 区域边界上的插入，落在起点侧会抬高 `called`（甚至把本应 pure 的位点标成 mixed），落在终点侧则被完全忽略。hp-v2 与 hp-tr-v3（v3 的 flanking 公式两侧都吸收边界插入，见 README 第 73-74 行的描述）对同一事件的口径不一致；hp-v2 自身前后也不一致。
 
 修复建议：把终点侧改成与起点侧对称——多消费 `end` 柱**之前**的 insertion 柱。例如在 `take_while` 之后手动补齐：继续迭代直到遇到 `rpos == Some(end)` 的柱（不含），或者改用 v3 的 `ref2qpos` 式窗口投影统一实现。
+
+**修复情况（2026-11-20）**：已按最小修复方案处理——窗口计数逻辑抽成模块级纯函数 `count_window`（`src/metrics/hp_metric_v2.rs`），起点侧跳过逻辑不变（等价 `skip_while(rpos != Some(start-1)).skip(1)`），终点侧改为遇到首个 `rpos >= end` 的柱即停止，`end-1` 与 `end` 之间的 trailing insertion 柱在停止前计入 `cnt`/`is_misc`/`align_span`，与起点侧及 v3 口径对称；`eq` 仍只统计 match 柱，deletion 柱语义不变。无边界插入时与旧 `take_while` 逻辑完全一致（零回归）。新增 5 个手造 aligned_pairs 回归测试（trailing insertion 计入 / 非 motif 插入置 mixed / leading insertion 行为不变 / 无边界插入等价旧逻辑 / 起点前 deletion+match 跳过），`cargo test` 18 passed / 0 failed；warning 均为修复前已存在的。
 
 ### Bug 6：bam2-msa — 参考末端位点全部被 delete 时 `draw_msa` panic；`compute_max_ins` 的 end 边界方向错误
 
@@ -266,13 +268,17 @@ let target_name = if hits.len() > 0 {
 
 - 位置：`src/msa.rs:292-297`：`base_counter.counter.entry(base).and_modify(|cnt| *cnt += 1)` 只会更新预初始化的 `-/A/C/G/T` 五个 key，read 序列中的 `N`（rust-htslib `seq().as_bytes()` 可以产生）既不报错也不计数，导致熵的分母与 fasta 内容口径不一致。建议用 `or_insert(0)` 或显式报错。
 
-### Bug 11：hp_tr_metric(v1) 会对未使用的 strand 输出全 0 行
+### Bug 11：hp_tr_metric(v1) 会对未使用的 strand 输出全 0 行 —— ✅ 已随 v1 移除而消除
 
-- 位置：`src/metrics/hp_tr_metric.rs:124-141`。`metric_core` 的 value 是 `[AlignCounter; 2]`，`build_metric_str` 无条件迭代两个元素，forward-only 的 read 也会输出一行 revcomp motif 的全 0 记录。该 mode 目前未接入 main（README 已注明），影响有限，但若将来接线需要注意。v2/v3 的 counts 是 HashMap，空 map 不产生行，没有此问题。
+- 原位置：`src/metrics/hp_tr_metric.rs:124-141`（已删除）。
 
-### Bug 12：无效 mode 的报错文案过时
+**处置情况（2026-11-20）**：v1 `HpTrMetric` 本就未接入 main（无可达的 mode 分支），连同 `HpMetric` 一起被移除（`Mode::HpTr` / `Mode::Hp` 枚举变体同步删除），本条不再存在。v2/v3 的 counts 是 HashMap，空 map 不产生行，没有此问题。
 
-- 位置：`src/main.rs:70`：`"not a valid mode. only hp-v2, hp-tr-v2 is available"` —— 实际可用的是 hp-v2 / hp-tr-v2 / hp-tr-v3 / bam2-msa（README 也承认这点）。顺带：`--mode hp-tr` / `--mode hp` 会被 clap 接受然后走这个报错，用户体验上容易误解为拼写错误。
+### Bug 12：无效 mode 的报错文案过时 —— ✅ 已修复
+
+- 原位置：`src/main.rs` 的 `_ =>` 报错分支与 `src/cli.rs` 的 `Mode` 枚举。
+
+**修复情况（2026-11-20）**：随 v1 清理一并处理——`Mode::HpTr` / `Mode::Hp` 变体从枚举中删除，`--mode hp-tr` / `--mode hp` 现在由 clap 在参数解析阶段直接拒绝（报 unknown value 并列出合法值），不再有「接受后落入过时文案报错」的体验问题；`main()` 里不可达的 `_ =>` 分支也一并移除，`match cli.mode` 对全部 4 个变体显式穷尽匹配。
 
 ### 其他小问题（不单独列 bug）
 
@@ -295,6 +301,7 @@ let target_name = if hits.len() > 0 {
 
 1. Bug 1（--noMar panic）与 Bug 2（--short-aln 无效）：一行级修复，立刻生效。
 2. ~~Bug 4（v3 q_start deletion 错位）~~：已于 2026-11-20 修复（见上文「修复情况」），并补充了边界 deletion 回归测试。
-3. Bug 5（hp-v2 前后不对称）：口径问题，需先与 v3 的定义对齐再改。
+3. ~~Bug 5（hp-v2 前后不对称）~~：已于 2026-11-20 修复（见上文「修复情况」），终点侧已与起点侧及 v3 口径对称。
 4. ~~Bug 3~~：已于 2026-11-19 在本仓库内修复（见上文「修复情况」），剩余事项：跑一遍双 fastq 端到端验证；mm2 升级到修复版本后清理本地实现。
-5. 其余按防御式编程顺手加固。
+5. ~~Bug 11~~ / ~~Bug 12~~：已于 2026-11-20 随 v1 metric 移除一并处理（见上文）。
+6. 其余按防御式编程顺手加固。

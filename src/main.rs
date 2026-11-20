@@ -24,8 +24,8 @@ use crate::{
     cli::{Cli, MetricArgs, Mode},
     global_data::GlobalData,
     metrics::{
-        TMetric, hp_metric::HpMetric, hp_metric_v2::HpMetricV2, hp_tr_metric::HpTrMetric,
-        hp_tr_metric_v2::HpTrMetricV2, hp_tr_metric_v3::HpTrMetricV3,
+        TMetric, hp_metric_v2::HpMetricV2, hp_tr_metric_v2::HpTrMetricV2,
+        hp_tr_metric_v3::HpTrMetricV3,
     },
     msa::msa_entrence,
 };
@@ -73,11 +73,6 @@ fn main() {
 
         Mode::Bam2Msa => {
             msa_entrence(&cli);
-        }
-
-        _ => {
-            tracing::error!("not a valid mode. only hp-v2, hp-tr-v2 is available");
-            std::process::exit(1);
         }
     }
 }

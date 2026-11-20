@@ -55,16 +55,10 @@ impl Cli {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub enum Mode {
-    /// homopolymer and tandem repeats
-    HpTr,
-
     HpTrV2,
 
     /// homopolymer and tandem repeats, repeats distribution
     HpTrV3,
-
-    /// homopolymer only
-    Hp,
 
     HpV2,
 
