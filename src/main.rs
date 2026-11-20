@@ -7,8 +7,17 @@ use std::{
 
 use clap::Parser;
 use crossbeam::channel::{Receiver, Sender};
-use gskits::pbar::{self, DEFAULT_INTERVAL};
-use mm2::{mapping_ext::MappingExt, query_seq_sender};
+use gskits::{
+    ds::ReadInfo,
+    fastx_reader::{fasta_reader::FastaFileReader, fastq_reader::FastqReader},
+    pbar::{self, DEFAULT_INTERVAL},
+    phreq::phreq_list_2_quality,
+};
+use mm2::{
+    mapping_ext::MappingExt,
+    params::{InputFilterParams, OupParams},
+};
+use rust_htslib::bam::Read;
 
 use crate::{
     aligner::build_aligner,
@@ -128,6 +137,67 @@ where
         let oup_filename = args.get_oup_file(mode);
         dump_metric_worker::<M>(metric_recv, &oup_filename, true);
     });
+}
+
+/// mm2 0.25.x / 0.26.1 的 `query_seq_sender` 在 fq/fastq 分支把 qname 后缀错误地
+/// 追加到了 `record.seq` 而不是 `record.name`，会污染 read 序列且无法区分多文件
+/// 来源。这里在本仓库内重新实现一份并修复该问题；fa / bam 分支行为与 mm2 保持一致。
+pub fn query_seq_sender(
+    filenames: &Vec<String>,
+    sender: Sender<ReadInfo>,
+    input_filter_params: &InputFilterParams,
+    oup_params: &OupParams,
+) {
+    let mut file_idx = 0;
+    for filename in filenames {
+        let qname_suffix = if filenames.len() == 1 {
+            None
+        } else {
+            Some(format!("__{}", file_idx))
+        };
+        if filename.ends_with("fa") || filename.ends_with("fasta") || filename.ends_with("fna") {
+            let fasta_reader = FastaFileReader::new(filename.clone());
+
+            for mut record in fasta_reader {
+                if let Some(suffix) = &qname_suffix {
+                    record.name.push_str(suffix);
+                }
+                sender.send(record).unwrap();
+            }
+        } else if filename.ends_with("bam") {
+            let mut bam_h = rust_htslib::bam::Reader::from_path(filename).unwrap();
+            bam_h.set_threads(4).unwrap();
+            for record in bam_h.records() {
+                let record = record.unwrap();
+                if input_filter_params.valid(&record) {
+                    sender
+                        .send(ReadInfo::from_bam_record(
+                            &record,
+                            qname_suffix.as_ref().map(|v| v.as_str()),
+                            &oup_params.pass_through_tags,
+                        ))
+                        .unwrap();
+                }
+            }
+        } else if filename.ends_with("fq") || filename.ends_with("fastq") {
+            let fq_iter = FastqReader::new(filename.to_string());
+            for mut record in fq_iter {
+                if let Some(suffix) = &qname_suffix {
+                    record.name.push_str(suffix);
+                }
+                let rq = phreq_list_2_quality(record.qual.as_ref().unwrap()).unwrap_or(0.);
+                record.rq = Some(rq);
+                sender.send(record).unwrap();
+            }
+        } else {
+            panic!(
+                "invalid file format {}. bam/fa/fasta/fna supported",
+                filename
+            );
+        }
+
+        file_idx += 1;
+    }
 }
 
 pub fn compute_metric_worker<M>(

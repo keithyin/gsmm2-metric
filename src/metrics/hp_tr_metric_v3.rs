@@ -70,6 +70,10 @@ fn count_repeats(motif_unit: &[u8], query_substr: &[u8]) -> (usize, bool, usize)
 /// 基于 aligned_pairs() 构建 ref_position -> query_position 的映射。
 /// 数组下标即 ref 局部坐标（index i <-> 局部 ref 位点 target_start + i），
 /// 长度固定为对齐覆盖的 ref 跨度 (target_end - target_start)。
+/// 返回 (ref2qpos, is_deleted)：
+///   - ref2qpos[i]：ref 局部位点 ts+i 对应的 query 位点；
+///   - is_deleted[i]：ref2qpos[i] 是否来自 deletion 分支（该 ref 位点被删，
+///     此时 ref2qpos[i] 是下一个 match 的 query 位点，而非该位点自身的坐标）。
 /// indel 处理规则：
 ///   - deletion (ref 有, query 无)：ref_pos 指向下一个未 deletion 的 query 位点（query 游标不变）
 ///   - insertion (query 有, ref 无)：ref_pos 指向当前 ref 游标 rcur（上一个 match 的下一个 query 位点）
@@ -77,16 +81,18 @@ fn count_repeats(motif_unit: &[u8], query_substr: &[u8]) -> (usize, bool, usize)
 /// query 游标初值为 align_info.query_start()：aligned_pairs() 的 query 坐标从该位置开始
 /// 递增（见 aligned_pairs::TAlignedPairs::aligned_pairs），所以前导 deletion 应映射到
 /// 第一个 match 的 query 位点 query_start，而非 0。
-fn build_ref2qpos(align_info: &Mapping) -> Vec<usize> {
+fn build_ref2qpos(align_info: &Mapping) -> (Vec<usize>, Vec<bool>) {
     let ts = align_info.target_start() as usize;
     let te = align_info.target_end() as usize;
     let mut ref2qpos = vec![0usize; te - ts];
+    let mut is_deleted = vec![false; te - ts];
     let mut rcur = ts;
     let mut qcur = align_info.query_start() as usize;
     for (qpos, rpos, _op) in align_info.aligned_pairs() {
         match (qpos, rpos) {
             (Some(q), Some(r)) => {
                 ref2qpos[r as usize - ts] = q as usize;
+                is_deleted[r as usize - ts] = false;
                 rcur = r as usize + 1;
                 qcur = q as usize + 1;
             }
@@ -94,17 +100,19 @@ fn build_ref2qpos(align_info: &Mapping) -> Vec<usize> {
                 // insertion 位于 ref 游标处；若后面跟 match，会被该 match 覆盖
                 if rcur < te {
                     ref2qpos[rcur - ts] = q as usize;
+                    is_deleted[rcur - ts] = false;
                 }
                 qcur = q as usize + 1;
             }
             (None, Some(r)) => {
                 ref2qpos[r as usize - ts] = qcur;
+                is_deleted[r as usize - ts] = true;
                 rcur = r as usize + 1;
             }
             (None, None) => unreachable!(),
         }
     }
-    ref2qpos
+    (ref2qpos, is_deleted)
 }
 
 #[derive(Debug, Default)]
@@ -258,7 +266,7 @@ impl TMetric for HpTrMetricV3 {
             // indel 规则见 build_ref2qpos。
             let ts = align_info.target_start as usize;
             let te = align_info.target_end as usize;
-            let ref2qpos = build_ref2qpos(&align_info);
+            let (ref2qpos, ref2qpos_deleted) = build_ref2qpos(&align_info);
 
             for v in region2motif.iter() {
                 let (start, end) = (v.0.0, v.0.1);
@@ -273,8 +281,15 @@ impl TMetric for HpTrMetricV3 {
                 // ref 侧无对齐柱）被 [ref2qpos[start-1-ts]+1, ref2qpos[start-ts]] 和
                 // [ref2qpos[end-1-ts], ref2qpos[end-ts]-1] 的区间覆盖；
                 // 当 motif 顶到对齐末端（end == te）时，尾随插入只能靠回落 query_end-1 捕获。
+                // 注意：ref2qpos[start-1-ts] 在 start-1 处是 deletion 时不再指向前一
+                // flanking 碱基，而是 motif 首碱基自己的 query 位点（deletion 分支写入
+                // 下一个 match 的 q），此时不能 +1，否则窗口右移 1、系统性少算 1 个 unit。
                 let q_start = if start > ts {
-                    ref2qpos[start - 1 - ts] + 1
+                    if ref2qpos_deleted[start - 1 - ts] {
+                        ref2qpos[start - ts]
+                    } else {
+                        ref2qpos[start - 1 - ts] + 1
+                    }
                 } else {
                     align_info.query_start as usize
                 };
@@ -405,11 +420,15 @@ mod test {
 
         // query_start=5：aligned_pairs() 产出 (None, Some(0)) 然后 (Some(5), Some(1))
         let mapping = make_mapping(5);
-        assert_eq!(build_ref2qpos(&mapping), vec![5, 5]);
+        assert_eq!(
+            build_ref2qpos(&mapping),
+            (vec![5, 5], vec![true, false]),
+            "ref 位点 0 被 delete，ref2qpos[0]=5 是下一个 match 的 q"
+        );
 
         // 对照：query_start=0 同 cigar，回归旧行为
         let mapping = make_mapping(0);
-        assert_eq!(build_ref2qpos(&mapping), vec![0, 0]);
+        assert_eq!(build_ref2qpos(&mapping), (vec![0, 0], vec![true, false]));
     }
 
     #[test]
@@ -542,6 +561,105 @@ mod test {
 
         for (qname, replacement, exp_called, exp_misc) in cases {
             let query_record = build_read(replacement);
+            let hits = align_single_query_to_targets(&query_record, &aligners);
+
+            let mut metric = HpTrMetricV3::default();
+            metric.set_qname(qname.to_string());
+            metric.set_target_name(Arc::new("target".to_string()));
+            metric.set_global_data(global_data.clone());
+            metric.set_mappings(hits);
+            metric.compute_metric(&query_record, false);
+            metric.set_metric_str();
+
+            let metric_str = metric.get_metric_str().as_ref().unwrap();
+            println!("{qname} metric:\n{metric_str}\n");
+
+            // 找到 (AC)4 的行
+            let row = metric_str
+                .lines()
+                .find(|line| line.contains("\t(AC)4\t"))
+                .unwrap_or_else(|| panic!("{qname}: no (AC)4 row. metric:\n{metric_str}"));
+            let cols: Vec<&str> = row.split('\t').collect();
+            // cols: qname rname motif tag ref called num eq alignspan
+            assert_eq!(cols[4], "4", "{qname}: ref");
+            assert_eq!(cols[5], exp_called.to_string(), "{qname}: called");
+            assert_eq!(
+                cols[3],
+                if exp_misc { "mixed" } else { "pure" },
+                "{qname}: tag"
+            );
+        }
+    }
+
+    /// Bug 4 回归测试：motif 起点前一个 ref 位点（以及跨入 motif 的位点）被 delete 时，
+    /// q_start 不得因 deletion 分支「写入下一个 match 的 q」而右移 1。
+    /// 参考位点：ref[173]='T'（flanking），ref[174..182]="ACACACAC"。
+    #[test]
+    fn test_boundary_deletion_window() {
+        let ref_file = "test_data/ref_Saureus_ATCC25923.m.new.corrected.fasta";
+        let fa_iter = FastaFileReader::new(ref_file.to_string());
+        let targets = read_fastx(fa_iter);
+
+        let targetname2seq = targets
+            .iter()
+            .map(|v| (Arc::new(v.name.clone()), Arc::new(v.seq.clone())))
+            .collect::<HashMap<_, _>>();
+        let ref_seq = targetname2seq.values().next().unwrap().clone();
+        let ref_seq = ref_seq.as_bytes();
+        assert_eq!(&ref_seq[174..182], b"ACACACAC");
+        assert_eq!(ref_seq[173], b'T');
+
+        let global_data = Arc::new(GlobalData::new(targetname2seq));
+
+        let mut index_params = IndexParams::default();
+        index_params.kmer = Some(11);
+        index_params.wins = Some(1);
+
+        let align_params = AlignParams::default()
+            .set_m_score(2)
+            .set_mm_score(5)
+            .set_gap_open_penalty("2,24".to_string())
+            .set_gap_extension_penalty("1,0".to_string());
+        let mut aligners = build_aligner(
+            "map-ont",
+            &index_params,
+            &MapParams::default(),
+            &align_params,
+            &OupParams::default(),
+            &targets,
+            10,
+        );
+        aligners[0].mapopt.best_n = 100000;
+        aligners[0].mapopt.pri_ratio = 0.1;
+
+        // (qname, read, exp_called, exp_misc)
+        let cases: Vec<(&str, Vec<u8>, usize, bool)> = vec![
+            // deletion 在 ref 位点 173（motif 起点前 1bp）：read 的 motif 内容完整。
+            // 修复前 q_start 右移 1 → 窗口 "CACACAC" → called=3 mixed；修复后 called=4 pure。
+            (
+                "read_del_before_motif",
+                [&ref_seq[..173], &ref_seq[174..300]].concat(),
+                4,
+                false,
+            ),
+            // 构造意图是 deletion 跨 ref 位点 173-174（flanking T + motif 首碱基 A）。
+            // 但 ref[172]='A' 与 motif 首碱基 ref[174]='A' 相同，删除 [172,173] 与
+            // [173,174] 产出同一条 read，比对器（cigar: 172M 2D 126M）选择了前者。
+            // 此时 read 的 motif 区域内容为完整的 "ACACACAC" → 正确答案 called=4 pure。
+            // （修复前 q_start 右移 1 → 窗口 "CACACAC" → called=3 mixed。）
+            (
+                "read_del_spanning_start",
+                [&ref_seq[..173], &ref_seq[175..300]].concat(),
+                4,
+                false,
+            ),
+        ];
+
+        for (qname, read, exp_called, exp_misc) in cases {
+            let query_record = ReadInfo::new_fa_record(
+                "query".to_string(),
+                String::from_utf8(read).unwrap(),
+            );
             let hits = align_single_query_to_targets(&query_record, &aligners);
 
             let mut metric = HpTrMetricV3::default();
