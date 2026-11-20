@@ -1,4 +1,4 @@
-use mm2::minimap2::Mapping;
+use crate::adapter::Mapping;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AlignOp {
@@ -101,14 +101,11 @@ pub trait TAlignedPairs {
 
 impl TAlignedPairs for Mapping {
     fn cigars(&self) -> &[(u32, u8)] {
-        &self.alignment.as_ref().unwrap().cigar.as_ref().unwrap()
+        self.cigar.as_ref().unwrap()
     }
 
     fn is_reverse(&self) -> bool {
-        match self.strand {
-            mm2::minimap2::Strand::Forward => false,
-            mm2::minimap2::Strand::Reverse => true,
-        }
+        self.is_rev()
     }
 
     fn query_end(&self) -> i64 {
@@ -127,38 +124,32 @@ impl TAlignedPairs for Mapping {
 
 #[cfg(test)]
 mod test {
-    use mm2::minimap2::{Alignment, Mapping};
-
-    use crate::aligned_pairs::TAlignedPairs;
+    use crate::adapter::{Mapping, Strand};
+    use crate::aligned_pairs::{AlignOp, TAlignedPairs};
 
     #[test]
     fn test_align_info() {
         let align_info = Mapping {
             query_name: None,
-            query_len: None,
             query_start: 1,
             query_end: 12,
-            strand: mm2::minimap2::Strand::Reverse,
+            strand: Strand::Reverse,
             target_name: None,
             target_len: 22,
             target_start: 0,
             target_end: 10,
-            match_len: 0,
-            block_len: 0,
             mapq: 0,
             is_primary: true,
             is_supplementary: false,
-            alignment: Some(Alignment {
-                nm: 0,
-                cigar: Some(vec![(4, 7), (2, 1), (4, 7), (1, 2), (1, 7)]),
-                cigar_str: None,
-                md: None,
-                cs: None,
-                alignment_score: None,
-            }),
+            cigar: Some(vec![(4, 7), (2, 1), (4, 7), (1, 2), (1, 7)]),
+            alignment_score: None,
         };
-        for align_info in align_info.aligned_pairs() {
-            println!("align_info:{:?}", align_info);
-        }
+        let pairs: Vec<_> = align_info.aligned_pairs().collect();
+        // reverse：query 从 11 倒走；cigar 4= 2I 4= 1D 1=
+        assert_eq!(pairs[0], (Some(11), Some(0), AlignOp::Equal(1)));
+        assert_eq!(pairs[4], (Some(7), None, AlignOp::Ins(1)));
+        assert_eq!(pairs[6], (Some(5), Some(4), AlignOp::Equal(1)));
+        assert_eq!(pairs[10], (None, Some(8), AlignOp::Del(1)));
+        assert_eq!(pairs[11], (Some(1), Some(9), AlignOp::Equal(1)));
     }
 }

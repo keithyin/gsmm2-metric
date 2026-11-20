@@ -13,13 +13,10 @@ use gskits::{
     pbar::{self, DEFAULT_INTERVAL},
     phreq::phreq_list_2_quality,
 };
-use mm2::{
-    mapping_ext::MappingExt,
-    params::{InputFilterParams, OupParams},
-};
 use rust_htslib::bam::Read;
 
 use crate::{
+    adapter::Mapping,
     aligner::build_aligner,
     cli::{Cli, MetricArgs, Mode},
     global_data::GlobalData,
@@ -28,14 +25,17 @@ use crate::{
         hp_tr_metric_v3::HpTrMetricV3,
     },
     msa::msa_entrence,
+    params::{InputFilterParams, OupParams},
 };
 
+pub mod adapter;
 pub mod aligned_pairs;
 pub mod aligner;
 pub mod cli;
 pub mod global_data;
 pub mod metrics;
 pub mod msa;
+pub mod params;
 
 fn main() {
     let cli = Cli::parse();
@@ -84,7 +84,7 @@ where
     let tot_threads = tot_threads.unwrap_or(num_cpus::get());
     assert!(tot_threads >= 10, "at least 10 threads are needed");
 
-    let (targetname2seq, aligners) = build_aligner(args, preset, Some(tot_threads));
+    let (targetname2seq, aligner) = build_aligner(args, preset, Some(tot_threads));
 
     let global_data = Arc::new(GlobalData::new(targetname2seq));
 
@@ -94,7 +94,7 @@ where
 
     let inp_filter_params = args.io_args.to_input_filter_params();
     thread::scope(|thread_scope| {
-        let aligners = &aligners;
+        let aligner = &aligner;
         let input_filter_params = &inp_filter_params;
         let oup_params = &oup_params;
         let (qs_sender, qs_recv) = crossbeam::channel::bounded(1000);
@@ -120,7 +120,7 @@ where
                         qs_recv_,
                         metric_sender_,
                         global_data_,
-                        aligners,
+                        aligner,
                         oup_params,
                         ref_anchored,
                     );
@@ -196,17 +196,17 @@ pub fn query_seq_sender(
 }
 
 pub fn compute_metric_worker<M>(
-    receiver: Receiver<mm2::gskits::ds::ReadInfo>,
+    receiver: Receiver<gskits::ds::ReadInfo>,
     sender: Sender<M>,
     global_data: Arc<GlobalData>,
-    aligners: &Vec<mm2::NoMemLeakAligner>,
-    oup_params: &mm2::params::OupParams,
+    aligner: &bandmap::Aligner,
+    oup_params: &OupParams,
     ref_anchored: bool,
 ) where
     M: TMetric,
 {
     for query_record in receiver {
-        let hits = mm2::align_single_query_to_targets(&query_record, aligners);
+        let hits = adapter::align_single_query_to_targets(aligner, &query_record);
         sender
             .send(compute_metric(
                 hits,
@@ -220,9 +220,9 @@ pub fn compute_metric_worker<M>(
 }
 
 pub fn compute_metric<M>(
-    hits: Vec<mm2::minimap2::Mapping>,
-    read_info: &mm2::gskits::ds::ReadInfo,
-    oup_params: &mm2::params::OupParams,
+    hits: Vec<Mapping>,
+    read_info: &gskits::ds::ReadInfo,
+    oup_params: &OupParams,
     global_data: Arc<GlobalData>,
     ref_anchored: bool,
 ) -> M
@@ -231,6 +231,8 @@ where
 {
     let mut metric = M::default();
     metric.set_qname(read_info.name.clone());
+
+    dump_hits_if_enabled(&hits);
 
     let hits = hits
         .into_iter()
@@ -254,7 +256,7 @@ where
     let hits = hits
         .into_iter()
         .filter(|v| v.target_name.as_ref().unwrap() == &target_name)
-        .filter(|v| MappingExt(v).identity() > 0.75)
+        .filter(|v| v.identity() > 0.75)
         .collect::<Vec<_>>();
 
     metric.set_global_data(global_data);
@@ -262,6 +264,37 @@ where
     metric.compute_metric(&read_info, ref_anchored);
     metric.set_metric_str();
     metric
+}
+
+/// 调试用：设置环境变量 GSM2_DUMP_HITS 后，把每条 read 的全部 hits
+/// （过滤前）打到 stderr，便于端到端对比时定位差异来自比对层还是 metric 层。
+fn dump_hits_if_enabled(hits: &[Mapping]) {
+    if std::env::var_os("GSM2_DUMP_HITS").is_none() {
+        return;
+    }
+    for hit in hits {
+        eprintln!(
+            "HIT\t{}\t{}\t{:?}\t{}-{}\t{}-{}\tprimary={}\tsupp={}\tidentity={:.4}\tscore={:?}\tcigar={}",
+            hit.query_name.as_ref().map(|v| v.as_str()).unwrap_or(""),
+            hit.target_name.as_ref().map(|v| v.as_str()).unwrap_or(""),
+            hit.strand,
+            hit.query_start,
+            hit.query_end,
+            hit.target_start,
+            hit.target_end,
+            hit.is_primary,
+            hit.is_supplementary,
+            hit.identity(),
+            hit.alignment_score,
+            hit.cigar
+                .as_ref()
+                .map(|c| c
+                    .iter()
+                    .map(|(n, op)| format!("{}{}", n, op))
+                    .collect::<String>())
+                .unwrap_or_default(),
+        );
+    }
 }
 
 pub fn dump_metric_worker<M>(metric_recv: Receiver<M>, fname: &str, enable_pb: bool)

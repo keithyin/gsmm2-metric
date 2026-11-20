@@ -1,6 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use mm2::minimap2::{Aligner, Mapping};
+use bandmap::Preset;
+
+use crate::adapter::{self, Mapping};
 
 /// ref 位点 -> 覆盖该位点的 motif 区间，即 GlobalDataKey::TargetRegion2Motif4HpTr。
 pub type RefPos2Motifs = HashMap<usize, Vec<((usize, usize), Arc<String>)>>;
@@ -103,48 +105,62 @@ pub fn do_align_4_homo(ori_query_seq: &str, target_substr: &str) -> Option<Mappi
         return None;
     }
 
-    let mut aligner = Aligner::builder()
-        .map_ont()
-        .with_cigar() // cigar_str has bug in minimap2="0.1.20+minimap2.2.28"
-        .with_sam_out()
-        .with_index_threads(1);
-
-    aligner.mapopt.best_n = 1;
-    aligner.idxopt.k = 11;
-    aligner.idxopt.w = 1;
-
-    aligner.mapopt.a = 4;
-    aligner.mapopt.b = 10;
-    aligner.mapopt.q = 4;
-    aligner.mapopt.q2 = 24;
-    aligner.mapopt.e = 2;
-    aligner.mapopt.e2 = 1;
-
-    let aligner = aligner
-        .with_seq_and_id(target_substr.as_bytes(), "target".as_bytes())
+    // 与 mm2 版本参数一一对应：
+    // k=11 w=1；a=4 b=10 q=4 q2=24 e=2 e2=1；best_n=1；EQX cigar；只取 primary。
+    // mid_occ 保持 bandmap 校准（见 aligner.rs 的说明；mm2 内存索引写死的 1000
+    // 不模仿——实测钉死会破坏合成数据一致性）。
+    let mut aligner = bandmap::Aligner::builder(Preset::MapOnt)
+        .k(11)
+        .w(1)
+        .from_seqs(vec![(
+            "target".to_string(),
+            target_substr.as_bytes().to_vec(),
+        )])
         .unwrap();
-    let mut hits = aligner
-        .map(
-            ori_query_seq.as_bytes(),
-            false,
-            false,
-            None,
-            Some(&[0x4000000, 0x40000000]),
-            Some(b"query"),
-        )
-        .unwrap()
-        .into_iter()
-        .filter(|hit| hit.is_primary)
-        .map(|v| Some(v))
-        .collect::<Vec<_>>();
 
-    if hits.is_empty() {
-        None
-    } else if !hits[0].as_ref().unwrap().is_primary {
-        None
-    } else {
-        hits[0].take()
+    let scoring = &mut aligner.options_mut().scoring;
+    scoring.match_score = 4;
+    scoring.mismatch_penalty = 10;
+    scoring.gap_open = 4;
+    scoring.gap_open2 = 24;
+    scoring.gap_extend = 2;
+    scoring.gap_extend2 = 1;
+    // mm2 重对齐的 map flags = [0x4000000(EQX), 0x40000000(MM_F_SAM_HIT_ONLY)]；
+    // 后者只影响 SAM 输出不影响比对结果，无需在 bandmap 侧模仿。
+    aligner.options_mut().filtering.best_n = 1;
+    aligner.output_config_mut().eqx = true;
+
+    let result = aligner.map_seq("query", ori_query_seq.as_bytes());
+
+    if std::env::var_os("GSM2_DUMP_REALIGN").is_some() {
+        for m in &result.mappings {
+            let q20: String = ori_query_seq.chars().take(20).collect();
+            let t20: String = target_substr.chars().take(20).collect();
+            eprintln!(
+                "REALIGN\tscore={}\tqlen={}\ttlen={}\tq20={}\tt20={}\tqr={}..{}\ttr={}..{}\tcigar={}",
+                m.score,
+                ori_query_seq.len(),
+                target_substr.len(),
+                q20,
+                t20,
+                m.query_start,
+                m.query_end,
+                m.target_start,
+                m.target_end,
+                m.cigar.as_deref().unwrap_or(""),
+            );
+        }
     }
+
+    let qname = Some(Arc::new("query".to_string()));
+    let hits: Vec<Mapping> = result
+        .mappings
+        .iter()
+        .filter(|hit| hit.is_primary)
+        .map(|hit| adapter::from_bandmap(hit, qname.clone()))
+        .collect();
+
+    hits.into_iter().next()
 }
 
 #[cfg(test)]

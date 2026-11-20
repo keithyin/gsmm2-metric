@@ -2,10 +2,10 @@ use std::{collections::HashMap, panic, sync::Arc};
 
 use gskits::dna::reverse_complement;
 use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
-use mm2::minimap2::Mapping;
 use regex::Regex;
 
 use crate::{
+    adapter::{Mapping, Strand},
     aligned_pairs::{AlignOp, TAlignedPairs},
     global_data::{GlobalData, GlobalDataKey, GlobalDataValue},
     metrics::{
@@ -83,7 +83,7 @@ impl TMetric for HpTrMetricV2 {
     fn get_global_data(&self) -> &GlobalData {
         self.global_data.as_ref().unwrap()
     }
-    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo, reference_anchored: bool) {
+    fn compute_metric(&mut self, read_info: &gskits::ds::ReadInfo, reference_anchored: bool) {
         if self.align_infos.is_empty() {
             return;
         }
@@ -172,7 +172,7 @@ impl TMetric for HpTrMetricV2 {
             }
             let align_info = align_info.unwrap();
 
-            if !matches!(align_info.strand, mm2::minimap2::Strand::Forward) {
+            if !matches!(align_info.strand, Strand::Forward) {
                 tracing::warn!(
                     "still reverse aligment. QueryName:{}. QueryStartEnd:{}-{}",
                     read_info.name,
@@ -243,7 +243,7 @@ impl TMetric for HpTrMetricV2 {
         self.tname.as_ref().unwrap()
     }
 
-    fn get_mappings_mut(&mut self) -> &mut Vec<mm2::minimap2::Mapping> {
+    fn get_mappings_mut(&mut self) -> &mut Vec<Mapping> {
         &mut self.align_infos
     }
 
@@ -263,15 +263,13 @@ mod test {
         ds::ReadInfo,
         fastx_reader::{fasta_reader::FastaFileReader, read_fastx},
     };
-    use mm2::{
-        align_single_query_to_targets, build_aligner,
-        mapping_ext::MappingExt,
-        params::{AlignParams, IndexParams, MapParams, OupParams},
-    };
 
     use crate::{
+        adapter,
+        aligner::build_aligner_from_params,
         global_data::GlobalData,
         metrics::{TMetric, hp_tr_metric_v2::HpTrMetricV2},
+        params::{AlignParams, IndexParams},
     };
 
     #[test]
@@ -294,35 +292,17 @@ mod test {
 
         let global_data = Arc::new(GlobalData::new(targetname2seq));
 
-        let mut index_params = IndexParams::default();
-        index_params.kmer = Some(11);
-        index_params.wins = Some(1);
+        let index_params = IndexParams::default().set_kmer(11).set_wins(1);
 
         let align_params = AlignParams::default()
             .set_m_score(2)
             .set_mm_score(5)
             .set_gap_open_penalty("2,24".to_string())
             .set_gap_extension_penalty("1,0".to_string());
-        let mut aligners = build_aligner(
-            "map-ont",
-            &index_params,
-            &MapParams::default(),
-            &align_params,
-            &OupParams::default(),
-            &targets,
-            10,
-        );
+        let mut aligner = build_aligner_from_params("map-ont", &index_params, &align_params, &targets);
 
-        // // aligner.mapopt.min_cnt = 2;
-        // aligner.mapopt.best_n = 100000;
-        // // aligner.mapopt.min_dp_max = 10; // min dp score
-        // aligner.mapopt.pri_ratio = 0.5; // min dp score
-        // aligner.idxopt;
-        println!("{:?}", aligners[0].mapopt);
-        println!("{:?}", aligners[0].idxopt);
-
-        aligners[0].mapopt.best_n = 100000;
-        aligners[0].mapopt.pri_ratio = 0.1;
+        aligner.options_mut().filtering.best_n = 100000;
+        aligner.options_mut().filtering.pri_ratio = 0.1;
         let seq = b"CCCTCCCAATGATGTATAAACAATTATATGTTATGTTCATTATCCTACAAATCTCCAACATTGATGATTGGGCACAACAATTTTACCTGTTTAATAAGGTGAACAAAAAACAAACGAAAAAGGTGATAACAATGAACAACATTTACATTAGGAAATCCAAATTAACTGTAACTCATGTCCATGAAGTGAAAGCCGGTATTAAACCGACATCGGTTGTCGACAGTGTTCAATAGAAATCAAGAAATGATTATGGAAAAAAGATGCACTGTGGAAATGCGCTGGCGAAAAATTATATATTAATATTTTCAGACCAAAAAAGATGGCATTTCCCCTGTAAGTTATGTCTGCAGATACTTAAACGGTAAAGATAATAAAGTAAATCACATTGGGTGCCCTTTGCCAACATTAGGCGCATTCCCGACATCAGTTTTACACCTGAAAGAATCACCAGACCCAGATTTTCGGTGCCAATGATTATGTTGGTAAGTTAAAGTTGCAATTACGGCGGTAGTGACAAATCAAAGGCGTCTTTATCTCCATGTCAAAAAGAGCAAGCGGAAGATTATTACAAAGTGATGGTGGGCAGCAAATCAGTCATGAGTAATGGAAACATCGGACAAATGGCGTTTCTTATCTTGCGGTGACTCAATGGTGGGTCGCAATCATTAAATCCACCACATTAAAGCAATGATCCTTGGGAAGGCTTAAATGATATGTATGTATAGAGAAGTAAGGCTTTCACGGAGTATAACGGAATACTGGCTTTTAATCGTTTCTGGACTCAAGTATTTTGCGAGATGACAGATAATCCCAAATATCAAGATTTTGATTCAACCAACAAGAACACCCTTTGTCGATGATTTTGAAACAGCGCAAGTGGAGCCATTATCACAATTAGAAAAAAACACCTCTACTAAAACATGTGCTAGTTGGTCTACACAGTTGCACAACCGGGCTCTTTTGATGGTTTAAAACAAGCAGCATCAGAAGAAAAAGGCTATATGGTGCCATGGCGTAAAGAGTGGGAAATATCTCTCTCAAAACAAACAACGGAGGAGAGGAAAAAAGAGAGAGATAACTTTTTCCTCTTTACTCCCATGCACATATAGCCATTTTTCTTCTGATGCTGCTTGTTTAATCCTTCAAAAGAGCACGTTGTGAAAAAAAAAAAAAAGGAAAAAAAAAAAAAACCTTGTGTAGCCAACTAGCACATGTTAGTAAGAGTGTTTAATTTTGTGATATGGCACCTTGACGCTGTGTCCAAAAATATCGAACCAAAGGGTGTTCTTGTTGTGCCTGAATCAAATCTTCGAATTGGTTACGTCCACTTCCAAAAAAAATACTTGAGTCCCAAAACGATAAACCAGTATCCGTTTATACTCCTGAAAGGCTACTTCCTCTATACATATCATTTAAGCCTGCCCAAGAATCAATTGCTTTTTAATGTGGTGGATTTAAATGATGCGAACCCACCCATTGAGTCACGCAAAGATAAGAAACGCCATTTTCCGATGTTTCCATTACTCCATGACTTGATTGCTGTCACCAATCACTTCCGTAATGATACTTCGCTTCTCTTTTTGACCATGGAGATAAGACGCCTTTTGAATTTGTCACTACCGCGTAATGCACCTTTAACTACAACATAATCATTTGGCACCATATCCTGGTCGGTGATTTCTTCAGGTGAAAACTAGTGTCGGAAAATGGCGCCTATTGGCCAAAGGGCCATATTTGTGATTTTAAGCTTATTATCTTTACCGTAAGTATCTGCAGAACATAACTACAGGGAATTGCCATCTTTTATTTGGGTCTGAAAATATTAATATATAATTTTCGCCATCGCGCAATTTCCACAGTGGACATCTTTTTCGCATAATCATTTCTGATTTCCATATTGAACCTGTCGACAACGATGTGTTAATCCGGTTTACTTCCATTTGACATGAGTTACAAGTTAATTTGGATTCCTAGTAAATGTTGGTTCATTGTTAAACACCCTTTTCTGTTTGTTTGTATCACCATATTAAACAGGTAAACCATTGTGTGCCAATCATCAATGTTGGATTTGTAGATAATGAACATAACATTTATATTGTTATAATCATTGGGGAGACTTGAATACAAATGACTATATCTCTCTTCAAACAACAAACACCACCACAGACAACAGCAGAAAGGCAA";
         let fwd_part = &seq[..100];
         let rev_part = &seq[1074..1074 + 100];
@@ -331,12 +311,11 @@ mod test {
             String::from_utf8(fwd_part.to_vec()).unwrap(),
         );
 
-        let hits = align_single_query_to_targets(&fwd_query_record, &aligners);
+        let hits = adapter::align_single_query_to_targets(&aligner, &fwd_query_record);
 
         for hit in &hits {
-            let mapping_ext = MappingExt(hit);
             let (aligned_target, aligned_query) =
-                mapping_ext.aligned_2_str(target_seq.as_bytes(), fwd_part);
+                hit.aligned_2_str(target_seq.as_bytes(), fwd_part);
             println!(
                 "query_range:{}-{}, target_range:{}-{}, strand:{:?}",
                 hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand
@@ -359,12 +338,11 @@ mod test {
             String::from_utf8(rev_part.to_vec()).unwrap(),
         );
 
-        let hits = align_single_query_to_targets(&rev_query_record, &aligners);
+        let hits = adapter::align_single_query_to_targets(&aligner, &rev_query_record);
 
         for hit in &hits {
-            let mapping_ext = MappingExt(hit);
             let (aligned_target, aligned_query) =
-                mapping_ext.aligned_2_str(target_seq.as_bytes(), rev_part);
+                hit.aligned_2_str(target_seq.as_bytes(), rev_part);
             println!(
                 "query_range:{}-{}, target_range:{}-{}, strand:{:?}",
                 hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand

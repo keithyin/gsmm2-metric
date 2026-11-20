@@ -2,9 +2,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use gskits::dna::reverse_complement;
 use hp_tr_finder::single_seq_hp_tr_finder;
-use mm2::minimap2::Mapping;
 
 use crate::{
+    adapter::{Mapping, Strand},
     aligned_pairs::TAlignedPairs,
     global_data::{GlobalData, GlobalDataKey, GlobalDataValue},
     metrics::{
@@ -156,7 +156,7 @@ impl TMetric for HpTrMetricV3 {
         self.global_data.as_ref().unwrap()
     }
 
-    fn compute_metric(&mut self, read_info: &mm2::gskits::ds::ReadInfo, reference_anchored: bool) {
+    fn compute_metric(&mut self, read_info: &gskits::ds::ReadInfo, reference_anchored: bool) {
         if self.align_infos.is_empty() {
             return;
         }
@@ -247,7 +247,7 @@ impl TMetric for HpTrMetricV3 {
             }
             let align_info = align_info.unwrap();
 
-            if !matches!(align_info.strand, mm2::minimap2::Strand::Forward) {
+            if !matches!(align_info.strand, Strand::Forward) {
                 tracing::warn!(
                     "still reverse aligment. QueryName:{}. QueryStartEnd:{}-{}",
                     read_info.name,
@@ -352,7 +352,7 @@ impl TMetric for HpTrMetricV3 {
         self.tname.as_ref().unwrap()
     }
 
-    fn get_mappings_mut(&mut self) -> &mut Vec<mm2::minimap2::Mapping> {
+    fn get_mappings_mut(&mut self) -> &mut Vec<Mapping> {
         &mut self.align_infos
     }
 
@@ -372,29 +372,27 @@ mod test {
         ds::ReadInfo,
         fastx_reader::{fasta_reader::FastaFileReader, read_fastx},
     };
-    use mm2::{
-        align_single_query_to_targets, build_aligner,
-        params::{AlignParams, IndexParams, MapParams, OupParams},
-    };
 
     use crate::{
+        adapter,
+        aligner::build_aligner_from_params,
         global_data::GlobalData,
         metrics::{
             TMetric, hp_tr_metric_v3::HpTrMetricV3, hp_tr_metric_v3::build_ref2qpos,
             hp_tr_metric_v3::count_repeats,
         },
+        params::{AlignParams, IndexParams},
     };
 
     /// 前导 deletion 时，ref2qpos[0] 应映射到第一个 match 的 query 位点 query_start，
     /// 而不是写死的 0。
     #[test]
     fn test_build_ref2qpos() {
-        use mm2::minimap2::{Alignment, Mapping, Strand};
+        use crate::adapter::{Mapping, Strand};
 
         fn make_mapping(query_start: i32) -> Mapping {
             Mapping {
                 query_name: None,
-                query_len: None,
                 query_start,
                 query_end: query_start + 1,
                 strand: Strand::Forward,
@@ -402,19 +400,11 @@ mod test {
                 target_len: 22,
                 target_start: 0,
                 target_end: 2,
-                match_len: 0,
-                block_len: 0,
                 mapq: 0,
                 is_primary: true,
                 is_supplementary: false,
-                alignment: Some(Alignment {
-                    nm: 0,
-                    cigar: Some(vec![(1, 2), (1, 7)]), // 1xDel + 1xEqual
-                    cigar_str: None,
-                    md: None,
-                    cs: None,
-                    alignment_score: None,
-                }),
+                cigar: Some(vec![(1, 2), (1, 7)]), // 1xDel + 1xEqual
+                alignment_score: None,
             }
         }
 
@@ -453,18 +443,11 @@ mod test {
             .set_mm_score(5)
             .set_gap_open_penalty("2,24".to_string())
             .set_gap_extension_penalty("1,0".to_string());
-        let mut aligners = build_aligner(
-            "map-ont",
-            &index_params,
-            &MapParams::default(),
-            &align_params,
-            &OupParams::default(),
-            &targets,
-            10,
-        );
+        let mut aligner =
+            build_aligner_from_params("map-ont", &index_params, &align_params, &targets);
 
-        aligners[0].mapopt.best_n = 100000;
-        aligners[0].mapopt.pri_ratio = 0.1;
+        aligner.options_mut().filtering.best_n = 100000;
+        aligner.options_mut().filtering.pri_ratio = 0.1;
         let seq = b"CCCTCCCAATGATGTATAAACAATTATATGTTATGTTCATTATCCTACAAATCTCCAACATTGATGATTGGGCACAACAATTTTACCTGTTTAATAAGGTGAACAAAAAACAAACGAAAAAGGTGATAACAATGAACAACATTTACATTAGGAAATCCAAATTAACTGTAACTCATGTCCATGAAGTGAAAGCCGGTATTAAACCGACATCGGTTGTCGACAGTGTTCAATAGAAATCAAGAAATGATTATGGAAAAAAGATGCACTGTGGAAATGCGCTGGCGAAAAATTATATATTAATATTTTCAGACCAAAAAAGATGGCATTTCCCCTGTAAGTTATGTCTGCAGATACTTAAACGGTAAAGATAATAAAGTAAATCACATTGGGTGCCCTTTGCCAACATTAGGCGCATTCCCGACATCAGTTTTACACCTGAAAGAATCACCAGACCCAGATTTTCGGTGCCAATGATTATGTTGGTAAGTTAAAGTTGCAATTACGGCGGTAGTGACAAATCAAAGGCGTCTTTATCTCCATGTCAAAAAGAGCAAGCGGAAGATTATTACAAAGTGATGGTGGGCAGCAAATCAGTCATGAGTAATGGAAACATCGGACAAATGGCGTTTCTTATCTTGCGGTGACTCAATGGTGGGTCGCAATCATTAAATCCACCACATTAAAGCAATGATCCTTGGGAAGGCTTAAATGATATGTATGTATAGAGAAGTAAGGCTTTCACGGAGTATAACGGAATACTGGCTTTTAATCGTTTCTGGACTCAAGTATTTTGCGAGATGACAGATAATCCCAAATATCAAGATTTTGATTCAACCAACAAGAACACCCTTTGTCGATGATTTTGAAACAGCGCAAGTGGAGCCATTATCACAATTAGAAAAAAACACCTCTACTAAAACATGTGCTAGTTGGTCTACACAGTTGCACAACCGGGCTCTTTTGATGGTTTAAAACAAGCAGCATCAGAAGAAAAAGGCTATATGGTGCCATGGCGTAAAGAGTGGGAAATATCTCTCTCAAAACAAACAACGGAGGAGAGGAAAAAAGAGAGAGATAACTTTTTCCTCTTTACTCCCATGCACATATAGCCATTTTTCTTCTGATGCTGCTTGTTTAATCCTTCAAAAGAGCACGTTGTGAAAAAAAAAAAAAAGGAAAAAAAAAAAAAACCTTGTGTAGCCAACTAGCACATGTTAGTAAGAGTGTTTAATTTTGTGATATGGCACCTTGACGCTGTGTCCAAAAATATCGAACCAAAGGGTGTTCTTGTTGTGCCTGAATCAAATCTTCGAATTGGTTACGTCCACTTCCAAAAAAAATACTTGAGTCCCAAAACGATAAACCAGTATCCGTTTATACTCCTGAAAGGCTACTTCCTCTATACATATCATTTAAGCCTGCCCAAGAATCAATTGCTTTTTAATGTGGTGGATTTAAATGATGCGAACCCACCCATTGAGTCACGCAAAGATAAGAAACGCCATTTTCCGATGTTTCCATTACTCCATGACTTGATTGCTGTCACCAATCACTTCCGTAATGATACTTCGCTTCTCTTTTTGACCATGGAGATAAGACGCCTTTTGAATTTGTCACTACCGCGTAATGCACCTTTAACTACAACATAATCATTTGGCACCATATCCTGGTCGGTGATTTCTTCAGGTGAAAACTAGTGTCGGAAAATGGCGCCTATTGGCCAAAGGGCCATATTTGTGATTTTAAGCTTATTATCTTTACCGTAAGTATCTGCAGAACATAACTACAGGGAATTGCCATCTTTTATTTGGGTCTGAAAATATTAATATATAATTTTCGCCATCGCGCAATTTCCACAGTGGACATCTTTTTCGCATAATCATTTCTGATTTCCATATTGAACCTGTCGACAACGATGTGTTAATCCGGTTTACTTCCATTTGACATGAGTTACAAGTTAATTTGGATTCCTAGTAAATGTTGGTTCATTGTTAAACACCCTTTTCTGTTTGTTTGTATCACCATATTAAACAGGTAAACCATTGTGTGCCAATCATCAATGTTGGATTTGTAGATAATGAACATAACATTTATATTGTTATAATCATTGGGGAGACTTGAATACAAATGACTATATCTCTCTTCAAACAACAAACACCACCACAGACAACAGCAGAAAGGCAA";
         let fwd_part = &seq[..100];
         let rev_part = &seq[1074..1074 + 100];
@@ -473,7 +456,7 @@ mod test {
             String::from_utf8(fwd_part.to_vec()).unwrap(),
         );
 
-        let hits = align_single_query_to_targets(&fwd_query_record, &aligners);
+        let hits = adapter::align_single_query_to_targets(&aligner, &fwd_query_record);
 
         let mut metric = HpTrMetricV3::default();
         metric.set_qname("query".to_string());
@@ -489,7 +472,7 @@ mod test {
             String::from_utf8(rev_part.to_vec()).unwrap(),
         );
 
-        let hits = align_single_query_to_targets(&rev_query_record, &aligners);
+        let hits = adapter::align_single_query_to_targets(&aligner, &rev_query_record);
 
         let mut metric = HpTrMetricV3::default();
         metric.set_qname("query".to_string());
@@ -529,17 +512,10 @@ mod test {
             .set_mm_score(5)
             .set_gap_open_penalty("2,24".to_string())
             .set_gap_extension_penalty("1,0".to_string());
-        let mut aligners = build_aligner(
-            "map-ont",
-            &index_params,
-            &MapParams::default(),
-            &align_params,
-            &OupParams::default(),
-            &targets,
-            10,
-        );
-        aligners[0].mapopt.best_n = 100000;
-        aligners[0].mapopt.pri_ratio = 0.1;
+        let mut aligner =
+            build_aligner_from_params("map-ont", &index_params, &align_params, &targets);
+        aligner.options_mut().filtering.best_n = 100000;
+        aligner.options_mut().filtering.pri_ratio = 0.1;
 
         // read = ref[0..300]，但把 [174,182) 替换为指定序列
         let build_read = |replacement: &[u8]| -> ReadInfo {
@@ -561,7 +537,7 @@ mod test {
 
         for (qname, replacement, exp_called, exp_misc) in cases {
             let query_record = build_read(replacement);
-            let hits = align_single_query_to_targets(&query_record, &aligners);
+            let hits = adapter::align_single_query_to_targets(&aligner, &query_record);
 
             let mut metric = HpTrMetricV3::default();
             metric.set_qname(qname.to_string());
@@ -620,17 +596,10 @@ mod test {
             .set_mm_score(5)
             .set_gap_open_penalty("2,24".to_string())
             .set_gap_extension_penalty("1,0".to_string());
-        let mut aligners = build_aligner(
-            "map-ont",
-            &index_params,
-            &MapParams::default(),
-            &align_params,
-            &OupParams::default(),
-            &targets,
-            10,
-        );
-        aligners[0].mapopt.best_n = 100000;
-        aligners[0].mapopt.pri_ratio = 0.1;
+        let mut aligner =
+            build_aligner_from_params("map-ont", &index_params, &align_params, &targets);
+        aligner.options_mut().filtering.best_n = 100000;
+        aligner.options_mut().filtering.pri_ratio = 0.1;
 
         // (qname, read, exp_called, exp_misc)
         let cases: Vec<(&str, Vec<u8>, usize, bool)> = vec![
@@ -660,7 +629,7 @@ mod test {
                 "query".to_string(),
                 String::from_utf8(read).unwrap(),
             );
-            let hits = align_single_query_to_targets(&query_record, &aligners);
+            let hits = adapter::align_single_query_to_targets(&aligner, &query_record);
 
             let mut metric = HpTrMetricV3::default();
             metric.set_qname(qname.to_string());

@@ -37,7 +37,7 @@ gsmm2-metric --mode hp-tr-v3 \
 
 所有 metric mode 都走 [main.rs](src/main.rs) 的 `metric_entrance::<M>`：
 
-1. read 比对到 target（minimap2，`--preset` / `-m -M -o -e` 控制打分）。
+1. read 比对到 target（bandmap-core，纯 Rust 实现的 minimap2 风格 mapper；`--preset` / `-m -M -o -e` 控制打分）。
 2. 保留 primary（以及未开启 `--noSupp` 时的 supplementary），只保留与 primary **同一个 target** 的 hit，并且 `identity > 0.75`（[main.rs:189-192](src/main.rs#L189-L192)）。
 3. 每个 hit 依次执行下面的「mode 无关前缀」：
    1. **motif 边界收缩**：如果比对端点落在某个 HP/TR 区域内部，就把端点收缩到该区域的边界，避免 flank 干扰重对齐。查的是 `GlobalDataKey::TargetRegion2Motif4HpTr`（按 reference 位点建索引，见 [global_data.rs:100-111](src/global_data.rs#L100-L111)）。仅 `hp-tr-v2` / `hp-tr-v3` 做这一步，`hp-v2` 不做。
@@ -134,6 +134,12 @@ read_ac3	CP009361.1	(AC)4	pure	4	3	1	6	6
 ```
 
 读法：v2 说「这里多了 4 个碱基的插入 / 少了 2 个碱基的删除」，v3 说「reference 是 4 重复，read 测到 6 / 3 重复」。二者互补：v2 适合评估比对质量与错误构成，v3 适合看 STR 的等位基因长度分布。
+
+## 比对引擎与一致性验收
+
+- 比对引擎为 [bandmap-core](https://crates.io/crates/bandmap-core)（`bandmap` 库名，单索引覆盖全部 target，`Send + Sync`）。mm2 语义（EQX cigar identity、aligned_pairs 逐碱基柱、primary/supplementary 过滤）由 `src/adapter.rs` 与 `src/params.rs` 复刻。
+- 输出行序来自 HashMap 迭代，**每次进程运行顺序都不同**（既有行为）；行内容集合确定。
+- 一致性验收：`scripts/gen_test_queries.py` 生成确定性合成 reads（32 条，覆盖正向/反向互补/带扰动），`scripts/run_all_modes.sh <bin> <outdir>` 跑全部 mode，`scripts/compare_golden.sh` 与 `test_data/golden/`（mm2 基线固化）逐内容对比；真实数据对比用 `scripts/run_real_modes.sh` + `scripts/compare_runs.sh`。中间产物调试：`GSM2_DUMP_HITS=1`（per-read hits）与 `GSM2_DUMP_REALIGN=1`（重对齐 score/坐标/cigar）输出到 stderr。详细验收结论见 `docs/mm2_bandmap_migration.md`。
 
 ## 其它注意点
 

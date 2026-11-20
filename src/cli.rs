@@ -1,7 +1,7 @@
 use std::{fs, path, str::FromStr};
 
 use clap::{self, Args, Parser};
-use mm2::params::{AlignParams, IndexParams, InputFilterParams, MapParams, OupParams};
+use crate::params::{AlignParams, IndexParams, InputFilterParams, MapParams, OupParams};
 
 #[derive(Debug, Parser, Clone)]
 #[command(version, about, long_about=None)]
