@@ -1,5 +1,9 @@
 # gsmm2-metric
 
+[![CI](https://github.com/keithyin/gsmm2-metric/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/keithyin/gsmm2-metric/actions/workflows/rust.yml)
+[![crates.io](https://img.shields.io/crates/v/gsmm2-metric.svg)](https://crates.io/crates/gsmm2-metric)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 对 ONT 测序数据（fastq / fasta / bam）按 **read 粒度**统计 homopolymer(HP) 与 tandem repeat(TR) 位点上的比对特征与重复数分布。
 
 不同的 `--mode` 决定「拿到重对齐结果之后统计什么」，比对、motif 发现、重对齐这几步是**共用**的。本文档重点说明各 mode 的统计逻辑差异。
