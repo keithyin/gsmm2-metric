@@ -5,7 +5,7 @@ edition = "2024"
 description = "gsmm2 metric"
 license = "MIT"
 repository = "https://github.com/keithyin/gsmm2-metric"
-exclude = ["test_data/*"]
+exclude = ["test_data/*", ".claude", "bug-report.md", "refact.md", "demo.txt"]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
