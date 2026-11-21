@@ -1,32 +1,16 @@
-name: Rust
+name: Release
 
 on:
   push:
-    branches: ["main"]
     tags: ["v*"]
-  pull_request:
-    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    # tag push 走 release job(自带 build+test),这里只管 main 分支与 PR
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --verbose
-
   # v* tag:test 通过后发布 crates.io,并创建带二进制资产的 GitHub Release。
   # 需要 repo secret:CARGO_REGISTRY_TOKEN(crates.io API token)。
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -1,6 +1,6 @@
 # gsmm2-metric
 
-[![CI](https://github.com/keithyin/gsmm2-metric/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/keithyin/gsmm2-metric/actions/workflows/rust.yml)
+[![CI](https://github.com/keithyin/gsmm2-metric/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keithyin/gsmm2-metric/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/gsmm2-metric.svg)](https://crates.io/crates/gsmm2-metric)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
