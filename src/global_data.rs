@@ -3,7 +3,7 @@ use hp_tr_finder::{UnitAndRepeats, all_seq_hp_tr_finder};
 use once_cell::sync;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::metrics::hp_tr_metric_v2::HP_TR_REG;
+use crate::metrics::realign::HP_TR_REG;
 
 /// ref 位点 -> 覆盖该位点的 motif 区间（HP-TR 用 flatten 后的 HashMap 索引）。
 pub type TargetRegion2Motif4HpTrMap =

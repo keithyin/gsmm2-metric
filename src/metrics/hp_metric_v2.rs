@@ -1,16 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::kits::reverse_complement;
-use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
-use regex::Regex;
+use hp_tr_finder::single_seq_hp_tr_finder;
 
 use crate::{
-    adapter::{Mapping, Strand},
+    adapter::Mapping,
     aligned_pairs::{AlignOp, TAlignedPairs},
-    global_data::{GlobalData, GlobalDataKey, GlobalDataValue},
+    global_data::GlobalData,
     metrics::{
         TMetric,
-        hp_tr_tools::{do_align_4_homo, get_target_substr},
+        realign::{HP_REG, RealignConfig, realign_hit},
     },
 };
 
@@ -28,12 +26,6 @@ impl CounterWithAlignSpan {
         self.eq += eq;
         self.align_span += align_span;
     }
-}
-
-lazy_static::lazy_static! {
-    static ref HP_REG: Vec<HashMap<String, Regex>> = {
-        vec![UnitAndRepeats::new(1, 3).build_finder_regrex()]
-    };
 }
 
 /// 统计 HP 区域 `[start, end)` 投射到 query 上的窗口内碱基计数。
@@ -138,74 +130,22 @@ impl TMetric for HpMetricV2 {
         self.global_data.as_ref().unwrap()
     }
     fn compute_metric(&mut self, read_info: &crate::kits::ReadInfo, reference_anchored: bool) {
-        if self.align_infos.is_empty() {
-            return;
-        }
-        let target_name = self.align_infos[0].target_name.as_ref().unwrap();
-        let global_data_value = self
-            .global_data
-            .as_ref()
-            .unwrap()
-            .get(GlobalDataKey::TargetName2SeqAndRev);
-        let [target_seq_fwd, target_seq_rev] = match global_data_value {
-            GlobalDataValue::TargetName2SeqAndRev(v) => v.get().unwrap().get(target_name).unwrap(),
-            _ => panic!(""),
+        let cfg = RealignConfig {
+            shrink_to_boundary: false,
+            reference_anchored,
         };
-
-        // let read_seq = read_info.seq.as_bytes();
-
         for old_align_info in &self.align_infos {
-            let read_seq = &read_info.seq
-                [old_align_info.query_start as usize..old_align_info.query_end as usize];
-
-            let target_substr = get_target_substr(
-                old_align_info.target_start as usize,
-                old_align_info.target_end as usize,
-                old_align_info.is_reverse(),
-                target_seq_fwd,
-                target_seq_rev,
-            );
-
-            let (read_seq, target_substr) = if old_align_info.is_reverse() && reference_anchored {
-                let read_rev = reverse_complement(read_seq.as_bytes());
-                let read_rev = String::from_utf8(read_rev).unwrap();
-                let target_rev = reverse_complement(target_substr.as_bytes());
-                let target_rev = String::from_utf8(target_rev).unwrap();
-                (read_rev, target_rev)
-            } else {
-                (read_seq.to_string(), target_substr.to_string())
+            let Some(hit) = realign_hit(read_info, old_align_info, self.get_global_data(), &cfg)
+            else {
+                continue;
             };
 
-            let (read_seq, target_substr) = (&read_seq, &target_substr);
-            let read_seq_bytes = read_seq.as_bytes();
-
-            let align_info = do_align_4_homo(read_seq, target_substr);
-            if align_info.is_none() {
-                tracing::warn!(
-                    "no aligned result. QueryName:{}. QueryStartEnd:{}-{}, TargetStartEnd:{}-{}, strand:{:?}",
-                    read_info.name,
-                    old_align_info.query_start,
-                    old_align_info.query_end,
-                    old_align_info.target_start,
-                    old_align_info.target_end,
-                    old_align_info.strand
-                );
-                continue;
-            }
-            let align_info = align_info.unwrap();
-
-            if !matches!(align_info.strand, Strand::Forward) {
-                tracing::warn!(
-                    "still reverse aligment. QueryName:{}. QueryStartEnd:{}-{}",
-                    read_info.name,
-                    old_align_info.query_start,
-                    old_align_info.query_end,
-                );
-                continue;
-            }
+            let align_info = &hit.align;
+            let read_seq_bytes = hit.read_seq.as_bytes();
 
             let mut match_patterns: HashMap<String, Arc<String>> = HashMap::new();
-            let region2motif = single_seq_hp_tr_finder(&HP_REG, &mut match_patterns, target_substr);
+            let region2motif =
+                single_seq_hp_tr_finder(&HP_REG, &mut match_patterns, &hit.target_substr);
 
             for v in region2motif.iter() {
                 let (start, end) = (v.0.0, v.0.1);
@@ -229,7 +169,7 @@ impl TMetric for HpMetricV2 {
 
                 if (cnt as i64 - expected_cnt as i64).abs() >= 10 {
                     let (aligned_target, aligned_query) =
-                        align_info.aligned_2_str(target_substr.as_bytes(), read_seq_bytes);
+                        align_info.aligned_2_str(hit.target_substr.as_bytes(), read_seq_bytes);
                     let aligned_len = align_info.query_end - align_info.query_start;
                     tracing::warn!(
                         "\n query_name:{}, motif:{}, baseCnt:{}, expectedCnt:{}, QueryStartEnd:{}-{}, TargetStartEnd:{}-{}\ntarget:{}\nquery :{}",

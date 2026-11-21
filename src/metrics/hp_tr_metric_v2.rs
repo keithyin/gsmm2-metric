@@ -1,16 +1,14 @@
 use std::{collections::HashMap, panic, sync::Arc};
 
-use crate::kits::reverse_complement;
-use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
-use regex::Regex;
+use hp_tr_finder::single_seq_hp_tr_finder;
 
 use crate::{
-    adapter::{Mapping, Strand},
+    adapter::Mapping,
     aligned_pairs::{AlignOp, TAlignedPairs},
-    global_data::{GlobalData, GlobalDataKey, GlobalDataValue},
+    global_data::GlobalData,
     metrics::{
         TMetric,
-        hp_tr_tools::{do_align_4_homo, get_target_substr, shrink_to_motif_boundary},
+        realign::{HP_TR_REG, RealignConfig, realign_hit},
     },
 };
 
@@ -32,17 +30,6 @@ impl AlignCounter {
             _ => panic!("not a valid align op: {:?}", align_op),
         }
     }
-}
-
-lazy_static::lazy_static! {
-    pub static ref HP_TR_REG: Vec<HashMap<String, Regex>> = {
-        vec![
-            UnitAndRepeats::new(1, 3).build_finder_regrex(),
-            UnitAndRepeats::new(2, 3).build_finder_regrex(),
-            UnitAndRepeats::new(3, 3).build_finder_regrex(),
-            UnitAndRepeats::new(4, 3).build_finder_regrex(),
-        ]
-    };
 }
 
 #[derive(Debug, Default)]
@@ -84,108 +71,22 @@ impl TMetric for HpTrMetricV2 {
         self.global_data.as_ref().unwrap()
     }
     fn compute_metric(&mut self, read_info: &crate::kits::ReadInfo, reference_anchored: bool) {
-        if self.align_infos.is_empty() {
-            return;
-        }
-
-        let target_name = self.align_infos[0].target_name.as_ref().unwrap();
-        let global_data_value = self
-            .global_data
-            .as_ref()
-            .unwrap()
-            .get(GlobalDataKey::TargetName2SeqAndRev);
-        let [target_seq_fwd, target_seq_rev] = match global_data_value {
-            GlobalDataValue::TargetName2SeqAndRev(v) => v.get().unwrap().get(target_name).unwrap(),
-            _ => panic!(""),
+        let cfg = RealignConfig {
+            shrink_to_boundary: true,
+            reference_anchored,
         };
-
-        let global_data_value = self
-            .global_data
-            .as_ref()
-            .unwrap()
-            .get(GlobalDataKey::TargetRegion2Motif4HpTr);
-        let target_region_2_motif_all = match global_data_value {
-            GlobalDataValue::TargetRegion2Motif4HpTr(v) => {
-                v.get().unwrap().get(target_name).unwrap()
-            }
-            _ => panic!("TargetRegion2Motif4HpTr not found"),
-        };
-
         for old_align_info in &self.align_infos {
-            let raw_target_start = old_align_info.target_start as usize;
-            let raw_target_end = old_align_info.target_end as usize;
-            if raw_target_end == 0 {
-                tracing::warn!("aligned target end is zero.");
-                continue;
-            }
-            // 如果比对的 reference_start, reference_end 正好处于 hp-str 区域的中心位置，那就从两头往中间缩。
-            // 两个端点都落在同一个区域内时窗口会被缩成空，此时无法确定完整重复数，跳过该 hit。
-            let Some((old_target_start, old_target_end)) = shrink_to_motif_boundary(
-                raw_target_start,
-                raw_target_end,
-                target_region_2_motif_all,
-            ) else {
-                tracing::warn!(
-                    "target window collapses after motif-boundary shrink. QueryName:{}. TargetStartEnd:{}-{}, strand:{:?}",
-                    read_info.name,
-                    raw_target_start,
-                    raw_target_end,
-                    old_align_info.strand
-                );
+            let Some(hit) = realign_hit(read_info, old_align_info, self.get_global_data(), &cfg)
+            else {
                 continue;
             };
-            let target_substr = get_target_substr(
-                old_target_start,
-                old_target_end,
-                old_align_info.is_reverse(),
-                target_seq_fwd,
-                target_seq_rev,
-            );
-
-            let read_seq = &read_info.seq
-                [old_align_info.query_start as usize..old_align_info.query_end as usize];
-
-            let (read_seq, target_substr) = if old_align_info.is_reverse() && reference_anchored {
-                let read_rev = reverse_complement(read_seq.as_bytes());
-                let read_rev = String::from_utf8(read_rev).unwrap();
-                let target_rev = reverse_complement(target_substr.as_bytes());
-                let target_rev = String::from_utf8(target_rev).unwrap();
-                (read_rev, target_rev)
-            } else {
-                (read_seq.to_string(), target_substr.to_string())
-            };
-
-            let (read_seq, target_substr) = (&read_seq, &target_substr);
-
-            let align_info = do_align_4_homo(read_seq, target_substr);
-            if align_info.is_none() {
-                tracing::warn!(
-                    "no aligned result. QueryName:{}. QueryStartEnd:{}-{}, TargetStartEnd:{}-{}, strand:{:?}",
-                    read_info.name,
-                    old_align_info.query_start,
-                    old_align_info.query_end,
-                    old_align_info.target_start,
-                    old_align_info.target_end,
-                    old_align_info.strand
-                );
-                continue;
-            }
-            let align_info = align_info.unwrap();
-
-            if !matches!(align_info.strand, Strand::Forward) {
-                tracing::warn!(
-                    "still reverse aligment. QueryName:{}. QueryStartEnd:{}-{}",
-                    read_info.name,
-                    old_align_info.query_start,
-                    old_align_info.query_end,
-                );
-                continue;
-            }
 
             let mut match_patterns: HashMap<String, Arc<String>> = HashMap::new();
             let region2motif =
-                single_seq_hp_tr_finder(&HP_TR_REG, &mut match_patterns, target_substr).flatten();
+                single_seq_hp_tr_finder(&HP_TR_REG, &mut match_patterns, &hit.target_substr)
+                    .flatten();
 
+            let align_info = &hit.align;
             let mut pre_ins_cnt = 0;
             let target_start = align_info.target_start() as usize;
             let target_end = align_info.target_end() as usize;
