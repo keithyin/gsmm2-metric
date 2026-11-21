@@ -7,19 +7,19 @@ use std::{
 
 use clap::Parser;
 use crossbeam::channel::{Receiver, Sender};
-use gskits::{
-    ds::ReadInfo,
-    fastx_reader::{fasta_reader::FastaFileReader, fastq_reader::FastqReader},
-    pbar::{self, DEFAULT_INTERVAL},
-    phreq::phreq_list_2_quality,
-};
-use rust_htslib::bam::Read;
+use noodles::{bam, bgzf};
 
 use crate::{
     adapter::Mapping,
     aligner::build_aligner,
     cli::{Cli, MetricArgs, Mode},
     global_data::GlobalData,
+    kits::{
+        fastx::{FastaFileReader, FastqReader},
+        pbar::{self, DEFAULT_INTERVAL},
+        phreq::phreq_list_2_quality,
+        read_info::ReadInfo,
+    },
     metrics::{
         TMetric, hp_metric_v2::HpMetricV2, hp_tr_metric_v2::HpTrMetricV2,
         hp_tr_metric_v3::HpTrMetricV3,
@@ -33,6 +33,7 @@ pub mod aligned_pairs;
 pub mod aligner;
 pub mod cli;
 pub mod global_data;
+pub mod kits;
 pub mod metrics;
 pub mod msa;
 pub mod params;
@@ -160,18 +161,21 @@ pub fn query_seq_sender(
                 sender.send(record).unwrap();
             }
         } else if filename.ends_with("bam") {
-            let mut bam_h = rust_htslib::bam::Reader::from_path(filename).unwrap();
-            bam_h.set_threads(4).unwrap();
-            for record in bam_h.records() {
+            // 等价于原 rust-htslib `set_threads(4)`:4 个 BGZF 解压 worker。
+            let file = File::open(filename).unwrap();
+            let worker_count = std::num::NonZero::new(4).unwrap();
+            let bgzf_reader = bgzf::io::MultithreadedReader::with_worker_count(worker_count, file);
+            let mut bam_h = bam::io::Reader::from(bgzf_reader);
+            let header = bam_h.read_header().unwrap();
+            for record in bam_h.record_bufs(&header) {
                 let record = record.unwrap();
-                if input_filter_params.valid(&record) {
-                    sender
-                        .send(ReadInfo::from_bam_record(
-                            &record,
-                            qname_suffix.as_ref().map(|v| v.as_str()),
-                            &oup_params.pass_through_tags,
-                        ))
-                        .unwrap();
+                let mut read_info =
+                    ReadInfo::from_bam_record(&record, None, &oup_params.pass_through_tags);
+                if input_filter_params.valid(&read_info) {
+                    if let Some(suffix) = &qname_suffix {
+                        read_info.name.push_str(suffix);
+                    }
+                    sender.send(read_info).unwrap();
                 }
             }
         } else if filename.ends_with("fq") || filename.ends_with("fastq") {
@@ -196,7 +200,7 @@ pub fn query_seq_sender(
 }
 
 pub fn compute_metric_worker<M>(
-    receiver: Receiver<gskits::ds::ReadInfo>,
+    receiver: Receiver<ReadInfo>,
     sender: Sender<M>,
     global_data: Arc<GlobalData>,
     aligner: &bandmap::Aligner,
@@ -221,7 +225,7 @@ pub fn compute_metric_worker<M>(
 
 pub fn compute_metric<M>(
     hits: Vec<Mapping>,
-    read_info: &gskits::ds::ReadInfo,
+    read_info: &ReadInfo,
     oup_params: &OupParams,
     global_data: Arc<GlobalData>,
     ref_anchored: bool,

@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::adapter::Mapping;
 use crate::global_data::GlobalData;
-use gskits::ds::ReadInfo;
+use crate::kits::ReadInfo;
 
 pub mod hp_metric_v2;
 pub mod hp_tr_metric_v2;

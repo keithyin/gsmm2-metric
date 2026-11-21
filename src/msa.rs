@@ -6,22 +6,27 @@ use std::{
     usize,
 };
 
-use gskits::{
-    gsbam::bam_record_ext::BamRecordExt,
-    pbar::{DEFAULT_INTERVAL, get_bar_pb, get_spin_pb},
-};
-use rust_htslib::{
-    self,
-    bam::{Read, Record, ext::BamRecordExtensions},
+use noodles::sam::alignment::RecordBuf;
+
+use crate::{
+    cli::Cli,
+    kits::{
+        bam_ext::{BamRecordExt, aligned_pairs_full},
+        pbar::{DEFAULT_INTERVAL, get_bar_pb, get_spin_pb},
+    },
 };
 
-use crate::cli::Cli;
 pub fn msa_entrence(cli: &Cli) {
     let filepath = cli.metric_args.io_args.query[0].clone();
-    let mut reader = rust_htslib::bam::Reader::from_path(&filepath).unwrap();
-    reader
-        .set_threads(cli.threads.unwrap_or(num_cpus::get()))
-        .unwrap();
+    // 等价于原 rust-htslib `set_threads(cli.threads.unwrap_or(num_cpus))`:
+    // BGZF 解压 worker 数。
+    let file = fs::File::open(&filepath).unwrap();
+    let worker_count =
+        std::num::NonZero::new(cli.threads.unwrap_or(num_cpus::get()).max(1)).unwrap();
+    let bgzf_reader =
+        noodles::bgzf::io::MultithreadedReader::with_worker_count(worker_count, file);
+    let mut reader = noodles::bam::io::Reader::from(bgzf_reader);
+    let header = reader.read_header().unwrap();
     let output_filepath = cli.metric_args.get_oup_file(cli.mode);
     let output_filepath = format!("{}.fasta", output_filepath.rsplit_once(".").unwrap().0);
 
@@ -29,7 +34,7 @@ pub fn msa_entrence(cli: &Cli) {
 
     let pb = get_spin_pb(format!("reading {}", filepath), DEFAULT_INTERVAL);
     let all_records = reader
-        .records()
+        .record_bufs(&header)
         .into_iter()
         .map(|rec| {
             pb.inc(1);
@@ -37,9 +42,9 @@ pub fn msa_entrence(cli: &Cli) {
         })
         .filter(|rec| rec.is_ok())
         .map(|rec| rec.unwrap())
-        .filter(|rec| !rec.is_unmapped())
-        .filter(|rec| !rec.is_secondary())
-        .filter(|rec| !rec.is_supplementary())
+        .filter(|rec| !rec.flags().is_unmapped())
+        .filter(|rec| !rec.flags().is_secondary())
+        .filter(|rec| !rec.flags().is_supplementary())
         .collect::<Vec<_>>();
     pb.finish();
 
@@ -87,7 +92,7 @@ pub fn msa_entrence(cli: &Cli) {
 }
 
 fn compute_max_ins_of_each_ref_position(
-    records: &Vec<Record>,
+    records: &Vec<RecordBuf>,
     rstart: Option<usize>,
     rend: Option<usize>,
 ) -> HashMap<i64, i32> {
@@ -109,7 +114,7 @@ fn compute_max_ins_of_each_ref_position(
         // let mut qpos_cursor = None;
         let mut cur_ins = 0;
         let query_end = record_ext.query_alignment_end();
-        let mut aligned_pair_full = record.aligned_pairs_full().collect::<Vec<_>>();
+        let mut aligned_pair_full = aligned_pairs_full(record).collect::<Vec<_>>();
         if aligned_pair_full.len() == 0 {
             continue;
         }
@@ -215,7 +220,7 @@ impl LocusBaseCounter {
 }
 
 fn draw_msa(
-    records: &Vec<Record>,
+    records: &Vec<RecordBuf>,
     rstart: usize,
     rend: usize,
     major_pos2major_starting_point: &HashMap<usize, usize>,
@@ -253,7 +258,7 @@ fn draw_msa(
         let query_seq_bytes = query_seq.chars().collect::<Vec<_>>();
         let mut minor_cursor = 0;
 
-        for [qpos, rpos] in record.aligned_pairs_full() {
+        for [qpos, rpos] in aligned_pairs_full(record) {
             if rpos.is_some() {
                 rpos_cursor = rpos;
             }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use bandmap::Preset;
-use gskits::fastx_reader::{fasta_reader::FastaFileReader, read_fastx};
+use crate::kits::fastx::{FastaFileReader, read_fastx};
 
 use crate::{
     cli::MetricArgs,
@@ -39,7 +39,7 @@ pub fn build_aligner_from_params(
     preset: &str,
     index_params: &IndexParams,
     align_params: &AlignParams,
-    targets: &[gskits::ds::ReadInfo],
+    targets: &[crate::kits::ReadInfo],
 ) -> bandmap::Aligner {
     let preset = parse_preset(preset).unwrap_or_else(|| panic!("unknown preset: {}", preset));
 

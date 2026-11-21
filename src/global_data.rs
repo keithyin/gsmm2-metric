@@ -1,4 +1,4 @@
-use gskits::dna::reverse_complement;
+use crate::kits::reverse_complement;
 use hp_tr_finder::{UnitAndRepeats, all_seq_hp_tr_finder};
 use once_cell::sync;
 use std::{collections::HashMap, sync::Arc};

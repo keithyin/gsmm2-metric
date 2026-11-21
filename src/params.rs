@@ -3,10 +3,7 @@
 
 use std::collections::HashSet;
 
-use gskits::{
-    gsbam::bam_record_ext::{BamRecord, BamRecordExt},
-    utils::Range,
-};
+use crate::kits::{Range, ReadInfo};
 
 #[derive(Default)]
 pub struct InputFilterParams {
@@ -30,11 +27,12 @@ impl InputFilterParams {
         self
     }
 
-    pub fn valid(&self, record: &BamRecord) -> bool {
-        let record_ext = BamRecordExt::new(record);
-
+    /// 过滤 np / rq / qname 后缀。改用 `ReadInfo` 作为入参:
+    /// np/rq/qname 已在构建 `ReadInfo` 时从 BAM record 解出,
+    /// fa/fq 分支的 `ReadInfo` 字段为 None,自然不会被 np/rq 过滤。
+    pub fn valid(&self, record: &ReadInfo) -> bool {
         if let Some(np_range_) = &self.np_range {
-            if let Some(np) = record_ext.get_np() {
+            if let Some(np) = record.np {
                 if !np_range_.within_range(np as i32) {
                     return false;
                 }
@@ -42,7 +40,7 @@ impl InputFilterParams {
         }
 
         if let Some(rq_range_) = &self.rq_range {
-            if let Some(rq) = record_ext.get_rq() {
+            if let Some(rq) = record.rq {
                 if !rq_range_.within_range(rq) {
                     return false;
                 }
@@ -50,7 +48,7 @@ impl InputFilterParams {
         }
 
         if let Some(qname_suffix) = &self.qname_suffix {
-            if !record_ext.get_qname().ends_with(qname_suffix) {
+            if !record.name.ends_with(qname_suffix) {
                 return false;
             }
         }

@@ -11,8 +11,8 @@
 use std::sync::Arc;
 
 use bandmap::api::CigarOp;
-use gskits::dna::reverse_complement;
-use gskits::ds::ReadInfo;
+
+use crate::kits::{ReadInfo, reverse_complement};
 
 pub use bandmap::Strand;
 

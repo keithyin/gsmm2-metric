@@ -1,6 +1,6 @@
 use std::{collections::HashMap, i64, sync::Arc};
 
-use gskits::dna::reverse_complement;
+use crate::kits::reverse_complement;
 use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
 use regex::Regex;
 
@@ -149,7 +149,7 @@ impl TMetric for HpMetricV2 {
     fn get_global_data(&self) -> &GlobalData {
         self.global_data.as_ref().unwrap()
     }
-    fn compute_metric(&mut self, read_info: &gskits::ds::ReadInfo, reference_anchored: bool) {
+    fn compute_metric(&mut self, read_info: &crate::kits::ReadInfo, reference_anchored: bool) {
         if self.align_infos.is_empty() {
             return;
         }
@@ -315,9 +315,9 @@ impl TMetric for HpMetricV2 {
 mod test {
     use std::{collections::HashMap, sync::Arc};
 
-    use gskits::{
-        ds::ReadInfo,
-        fastx_reader::{fasta_reader::FastaFileReader, read_fastx},
+    use crate::kits::{
+        ReadInfo,
+        fastx::{FastaFileReader, read_fastx},
     };
 
     use crate::{
