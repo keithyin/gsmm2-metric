@@ -112,7 +112,7 @@ reference 在 /data1/REF_GENOMES/MG1655.fa
 #### 3.3.5 可选收敛方向（非迁移阻塞项）
 
 1. **上游 bandmap**：对 chimeric read 引入等价于 minimap2 `mm_split` 的拆分链语义——互不重叠的片段链保留为 supplementary 而非被 secondary 掩蔽；或在 `assign_parents_and_select` 的替代 hit 判定中放宽 disjoint 片段。需上游改动或调参验证，不属于本次依赖替换的范围。
-2. **数据侧**：该类 read 为 adapter-dimer 污染，下游评估通常应过滤。`--noSupp` 后两版本行为一致（supp hit 均被丢弃，21 条差异 read 不再暴露于 metric 输出）。
+2. **数据侧**：该类 read 为 adapter-dimer 污染，下游评估通常应过滤。`--noSupp` 后两版本行为一致（supp hit 均被丢弃，21 条差异 read 不再暴露于 metric 输出）。（2026-11-21 起也可用 `--noMar`：比对产生不止一个 chain（存在 supplementary/secondary）的 read 整条过滤、不产出输出行，此类嵌合 read 恰好命中该判定，见 README 的 `--noMar` 说明。）
 
 ## 四、验收过程中的重要教训
 

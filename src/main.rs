@@ -223,6 +223,15 @@ pub fn compute_metric_worker<M>(
     }
 }
 
+/// --noMar 判定：存在 supplementary/secondary chain 即视为 multi-mapping query。
+/// 语义对应 mm2 align_worker 的 `records.len() > 1 -> continue`：bandmap 恰有
+/// 一个 `is_primary && !is_supplementary` 的 sam_pri mapping，任何其余 mapping
+/// （supplementary / secondary，含 `is_primary && is_supplementary` 的原生旗标
+/// 形态）都是额外 chain。
+fn has_multiple_chains(hits: &[Mapping]) -> bool {
+    hits.iter().any(|v| !v.is_primary || v.is_supplementary)
+}
+
 pub fn compute_metric<M>(
     hits: Vec<Mapping>,
     read_info: &ReadInfo,
@@ -237,6 +246,20 @@ where
     metric.set_qname(read_info.name.clone());
 
     dump_hits_if_enabled(&hits);
+
+    // --noMar：query 比对产生不止一个 chain（存在 supplementary/secondary）时，
+    // 整条 query 过滤掉，不产出 metric 行。判定必须在所有下游过滤之前——
+    // secondary 会在下面的 discard_secondary 过滤中被丢弃，same-target 过滤会丢
+    // 跨 target 的 alt chain，但它们都必须参与 chain 判定。语义对应 mm2
+    // align_worker 的 `records.len() > 1 -> continue`（存在 supp/secondary 即扔）。
+    if oup_params.discard_multi_align_reads && has_multiple_chains(&hits) {
+        tracing::debug!(
+            "noMar: query {} has supplementary/secondary chains, filtered",
+            read_info.name
+        );
+        metric.set_metric_str(); // 空 metric_core -> 空行 -> dump 跳过
+        return metric;
+    }
 
     let hits = hits
         .into_iter()
@@ -328,4 +351,48 @@ where
     }
 
     pb.as_ref().map(|v| v.finish());
+}
+
+#[cfg(test)]
+mod test {
+    use super::has_multiple_chains;
+    use crate::adapter::{Mapping, Strand};
+
+    /// has_multiple_chains 只看旗标，不依赖 cigar/identity，dummy 字段即可。
+    fn mapping(is_primary: bool, is_supplementary: bool) -> Mapping {
+        Mapping {
+            query_name: None,
+            query_start: 0,
+            query_end: 10,
+            strand: Strand::Forward,
+            target_name: None,
+            target_len: 100,
+            target_start: 0,
+            target_end: 10,
+            mapq: 60,
+            is_primary,
+            is_supplementary,
+            cigar: None,
+            alignment_score: None,
+        }
+    }
+
+    #[test]
+    fn test_has_multiple_chains() {
+        // 空 hits（unmapped query）：不算 multi，走原有空 metric 逻辑
+        assert!(!has_multiple_chains(&[]));
+
+        // 只有 primary：唯一 chain，保留
+        assert!(!has_multiple_chains(&[mapping(true, false)]));
+
+        // primary + supplementary（分裂比对）：过滤
+        assert!(has_multiple_chains(&[mapping(true, false), mapping(false, true)]));
+
+        // primary + secondary（多位点 alt chain）：过滤
+        assert!(has_multiple_chains(&[mapping(true, false), mapping(false, false)]));
+
+        // reorder_like_mm2 归一后的「假 primary」（bandmap is_primary&&is_supp
+        // 已被归一为非 primary）：同样视为多余 chain
+        assert!(has_multiple_chains(&[mapping(true, false), mapping(true, true)]));
+    }
 }

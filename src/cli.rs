@@ -265,7 +265,7 @@ pub struct OupArgs {
 
     #[arg(
         long = "noMar",
-        help = "discard multi-mapping reads, only keep the unique mapping reads for metric"
+        help = "drop the whole query if its alignment yields more than one chain (any supplementary/secondary mapping); filtered queries produce no output row"
     )]
     pub discard_multi_mapping_reads: bool,
 

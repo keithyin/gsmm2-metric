@@ -24,6 +24,8 @@ Review 范围：`src/` 全部 Rust 文件（main.rs、cli.rs、aligner.rs、glob
 
 修复建议：要么移除 `--noMar` 参数（README 未承诺它有独立的实现路径），要么在 `compute_metric` 里自行实现"primary 唯一性过滤"（例如：与 primary query 区间重叠 > 50% 的其他 hit 丢弃），并把 `to_oup_params` 改为不再触发互斥断言的写法。
 
+**修复情况（2026-11-21）**：已按第二种建议实现——`--noMar` 语义定为「query 比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时整条 query 过滤掉、不产出输出行」，与 mm2 `align_worker` 的 `records.len() > 1 -> continue` 语义一致，不做 identity 过滤（存在任何 supp/secondary 即扔）。实现：移除 `OupParams` 三个 setter 的互斥断言（src/params.rs）；src/main.rs 新增 `has_multiple_chains`（`any(!is_primary || is_supplementary)`，不依赖 `reorder_like_mm2` 的旗标归一前提），在 `compute_metric` 的所有下游过滤（primary/supp 保留、same-target、identity>0.75）之前判定——secondary 与跨 target 的 alt chain 都必须参与 chain 判定——命中则提前返回空 metric_str（dump 层静默跳过）；`--noMar` + `--noSupp` 组合合法但无实际效果。附带文档：README mode 表移除已删除的 `hp-tr` / `hp` 行、README 与 cli help 同步语义、docs/CHANGELOG.md 建档。验证：cargo test 24/24（含 `has_multiple_chains` 5 用例）；split-read（ref 两段拼接嵌合 read）基线 25 行 → `--noMar` 0 行；`scripts/compare_golden.sh` 6/6 PASS（默认路径零回归）。
+
 ### Bug 2：`--short-aln` 完全无效（`post_process_param` 是死代码）
 
 - 位置：定义在 `src/cli.rs:29-53`（`Cli::post_process_param`），但全仓库没有任何调用点（grep 确认仅此一处出现）。
@@ -299,7 +301,7 @@ let target_name = if hits.len() > 0 {
 
 ## 修复优先级建议
 
-1. Bug 1（--noMar panic）与 Bug 2（--short-aln 无效）：一行级修复，立刻生效。
+1. ~~Bug 1（--noMar panic）~~：已于 2026-11-21 实现并修复（见上文「修复情况」）。Bug 2（--short-aln 无效）仍待修：一行级修复，立刻生效。
 2. ~~Bug 4（v3 q_start deletion 错位）~~：已于 2026-11-20 修复（见上文「修复情况」），并补充了边界 deletion 回归测试。
 3. ~~Bug 5（hp-v2 前后不对称）~~：已于 2026-11-20 修复（见上文「修复情况」），终点侧已与起点侧及 v3 口径对称。
 4. ~~Bug 3~~：已于 2026-11-19 在本仓库内修复（见上文「修复情况」），剩余事项：跑一遍双 fastq 端到端验证；mm2 升级到修复版本后清理本地实现。

@@ -178,6 +178,10 @@ pub struct OupParams {
     pub discard_supplementary: bool,
     pub oup_identity_threshold: f32,
     pub oup_coverage_threshold: f32,
+    /// --noMar：query 比对产生不止一个 chain（存在 supplementary 或 secondary
+    /// mapping）时，整条 query 过滤掉，不产出 metric 行。
+    /// 与 discard_secondary / discard_supplementary 相互独立（过滤判定发生在
+    /// 二者生效之前，main.rs `compute_metric`）。
     pub discard_multi_align_reads: bool,
     pub pass_through_tags: HashSet<String>,
 }
@@ -201,17 +205,11 @@ impl OupParams {
     }
 
     pub fn set_discard_secondary(mut self, discard_secondary: bool) -> Self {
-        if discard_secondary {
-            assert!(self.discard_multi_align_reads == false);
-        }
         self.discard_secondary = discard_secondary;
         self
     }
 
     pub fn set_discard_supplementary(mut self, discard_supplementary: bool) -> Self {
-        if discard_supplementary {
-            assert!(self.discard_multi_align_reads == false);
-        }
         self.discard_supplementary = discard_supplementary;
         self
     }
@@ -224,11 +222,6 @@ impl OupParams {
         self
     }
     pub fn set_discard_multi_align_reads(mut self, discard_multi_align_reads: bool) -> Self {
-        if discard_multi_align_reads {
-            assert!(self.discard_secondary == false);
-            assert!(self.discard_supplementary == false);
-        }
-
         self.discard_multi_align_reads = discard_multi_align_reads;
         self
     }

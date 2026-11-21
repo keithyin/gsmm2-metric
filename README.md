@@ -23,17 +23,15 @@ gsmm2-metric --mode hp-tr-v3 \
 - `--threads` 至少 10：其中 `threads - 4` 个线程算 metric，其余用于读入、比对、落盘。
 - 默认输出文件名 `{query 去掉扩展名}.{Mode:?}-fact.csv`，同时写一个同名 `.log`。**文件扩展名是 csv，实际分隔符是制表符**（历史原因），下游按 TSV 解析。
 - `--short-aln`：短 query / 短 target 场景下调低 kmer 与 min_cnt 等阈值（见 [src/cli.rs](src/cli.rs)）。
-- `--noSupp` / `--noMar`：丢弃 supplementary / 多比对 read。
+- `--noSupp`：丢弃 supplementary，metric 只用 primary。`--noMar`：比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时整条 read 过滤掉、不产出输出行；判定先于 same-target / identity 过滤（跨 target 的 alt chain 也算），见 [main.rs](src/main.rs) 的 `compute_metric`。
 - `--refAnchored`：reverse 比对先把 read 子串和 target 子串都反向互补再重对齐，使统计统一锚定到 reference 方向。**该开关同时影响 hp-tr-v2 / hp-tr-v3 / hp-v2 三个 mode 的取窗口逻辑**。
 
 ## Mode 一览
 
 | mode | metric 实现 | 统计对象 | 输出列 |
 |---|---|---|---|
-| `hp-tr` | [hp_tr_metric.rs](src/metrics/hp_tr_metric.rs) | 未接入 `main` 分发，会直接报错退出 | — |
 | `hp-tr-v2` | [hp_tr_metric_v2.rs](src/metrics/hp_tr_metric_v2.rs) | **比对算子谱**：motif 区域内的 eq/diff/ins/del | `qname rname motif eq diff ins del` |
 | `hp-tr-v3` | [hp_tr_metric_v3.rs](src/metrics/hp_tr_metric_v3.rs) | **重复数分布**：ref repeats vs called repeats | `qname rname motif tag ref called num eq alignspan` |
-| `hp` | [hp_metric.rs](src/metrics/hp_metric.rs) | 未接入 `main` 分发，会直接报错退出 | — |
 | `hp-v2` | [hp_metric_v2.rs](src/metrics/hp_metric_v2.rs) | **HP 重复数分布**（仅 unit 长度 1） | `qname rname motif tag called num eq alignspan` |
 | `bam2-msa` | [msa.rs](src/msa.rs) | 不走 `TMetric`，由 bam 生成 MSA fasta + 逐列 Shannon 熵 | `.fasta` / `.shannon.txt` |
 
@@ -42,7 +40,7 @@ gsmm2-metric --mode hp-tr-v3 \
 所有 metric mode 都走 [main.rs](src/main.rs) 的 `metric_entrance::<M>`：
 
 1. read 比对到 target（bandmap-core，纯 Rust 实现的 minimap2 风格 mapper；`--preset` / `-m -M -o -e` 控制打分）。
-2. 保留 primary（以及未开启 `--noSupp` 时的 supplementary），只保留与 primary **同一个 target** 的 hit，并且 `identity > 0.75`（[main.rs:189-192](src/main.rs#L189-L192)）。
+2. `--noMar` 先行判定：比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时整条 read 过滤掉，不产出输出行；否则保留 primary（以及未开启 `--noSupp` 时的 supplementary），只保留与 primary **同一个 target** 的 hit，并且 `identity > 0.75`（[main.rs](src/main.rs) 的 `compute_metric`）。
 3. 每个 hit 依次执行下面的「mode 无关前缀」：
    1. **motif 边界收缩**：如果比对端点落在某个 HP/TR 区域内部，就把端点收缩到该区域的边界，避免 flank 干扰重对齐。查的是 `GlobalDataKey::TargetRegion2Motif4HpTr`（按 reference 位点建索引，见 [global_data.rs:100-111](src/global_data.rs#L100-L111)）。仅 `hp-tr-v2` / `hp-tr-v3` 做这一步，`hp-v2` 不做。
    2. `get_target_substr()`：取 target 子串；如果切片边界落在同种碱基内部，再往内收缩 1~n 个碱基，保证窗口不切断 homopolymer（[hp_tr_tools.rs:16-49](src/metrics/hp_tr_tools.rs#L16-L49)）。

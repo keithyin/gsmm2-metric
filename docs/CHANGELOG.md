@@ -1,0 +1,60 @@
+# Changelog
+
+格式参照 Keep a Changelog，版本与 git tag（`v*`）一一对应；0.8.1 之前未逐条记录。
+
+## Unreleased
+
+### Added
+
+- `--noMar` 实装：query 比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时，整条 query 过滤掉、不产出输出行（复用「空 metric_str 不落盘」机制，静默跳过）。判定先于 same-target / identity 过滤（跨 target 的 alt chain 也参与判定），不做 identity 阈值过滤；语义对应迁移前 mm2 `align_worker` 的 `records.len() > 1 -> continue`。新增 `has_multiple_chains` 纯函数与 5 用例单测，split-read 端到端验证通过。
+
+### Fixed
+
+- `--noMar` 传入后程序启动即 panic：`OupParams` setter 的互斥断言与 `to_oup_params` 硬编码的 `set_discard_secondary(true)` 冲突（[bug-report.md](../bug-report.md) Bug 1）。
+
+### Changed
+
+- 移除 `OupParams::set_discard_secondary` / `set_discard_supplementary` / `set_discard_multi_align_reads` 的互斥断言，三个 flag 相互独立；`--noMar` 与 `--noSupp` 组合合法但无实际效果（存在 supp 时 `--noMar` 已过滤整条 read）。
+- README mode 表移除已删除的 `hp-tr` / `hp` 两行（v0.8.2 起 v1 metric 文件与 mode 已不存在，clap 在参数解析阶段即拒绝）；`--noMar` / `--noSupp` 描述与共用流水线清单同步实际语义。
+
+## 0.10.1 — 2026-11-21
+
+### Changed
+
+- CI 迁移：GitLab CI → GitHub Actions，拆分为 `ci.yml`（build + test）与 `release.yml`（v* tag 触发 crates.io 发布与二进制 release）；README 增加 CI/crates.io/license 徽章。
+
+## 0.10.0 — 2026-11-21
+
+### Changed
+
+- refactor!: rust-htslib / gskits 依赖替换为 noodles（BAM/FASTX 读取），gskits 子集就地 vendor 进 `src/kits`；移植时顺带修复 gskits `sp` tag 实读 `sd` 的笔误。
+- bam2-msa 的 BGZF 解压线程数等价于原 `set_threads` 语义。
+
+## 0.9.0 — 2026-11-20
+
+### Changed
+
+- feat!: 比对引擎由 mm2 0.25.4（minimap2 2.28 FFI 封装）替换为 bandmap-core 2.0.0（纯 Rust minimap2 算法复刻）。一致性验收：合成数据 6/6 逐字节一致；真实数据 54 万条 reads 行级差异率 ≤0.0025%（归因于 chimeric read 拆分链合的引擎差异），详见 [mm2_bandmap_migration.md](mm2_bandmap_migration.md)。
+
+## 0.8.3 — 2026-11-20
+
+- 版本维护，无功能变更。
+
+## 0.8.2 — 2026-11-20
+
+### Fixed
+
+- 移除未接入 main 分发的 v1 `hp_metric.rs` / `hp_tr_metric.rs` 及对应 `Mode` 变体（无效 mode 现由 clap 在参数解析阶段拒绝）。
+- 重实现 `query_seq_sender`：修复多 fastq 输入时 qname 后缀被追加到序列而非 read 名的 mm2 上游 bug（fa/bam 分支行为与 mm2 保持一致）。
+- hp-tr-v3：motif 起点前一个 ref 位点发生 deletion 时 query 窗口起始错位、called 系统性少算 1 个 unit（`build_ref2qpos` 增补 `is_deleted` 语义，q_start 按 deletion 分支取值），补边界 deletion 回归测试。
+- hp-v2：取窗口对 insertion 前算后不算的不对称（trailing insertion 被丢弃），逻辑抽成 `count_window` 纯函数并补 5 个回归测试。
+
+## 0.8.1 — 2026-11-19
+
+### Added
+
+- feat: HpTrMetricV3（`(ref repeats, called repeats)` 重复数分布统计，mode `hp-tr-v3`）。
+
+### Fixed
+
+- 比对端点落在 motif 区域内部导致窗口塌缩时跳过该 hit（`shrink_to_motif_boundary` 返回 `None` 而非 panic）。
