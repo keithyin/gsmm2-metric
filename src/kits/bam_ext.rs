@@ -80,44 +80,18 @@ impl<'a> BamRecordExt<'a> {
         self.query_alignment_start() + aligned_qlen
     }
 
-    pub fn get_cx(&self) -> Option<u8> {
-        self.get_int(b"cx").map(|v| v as u8)
-    }
-
-    pub fn get_ch(&self) -> Option<u32> {
-        self.get_int(b"ch")
-    }
-
+    /// np 标量 tag → u32（输入过滤 InputFilterParams::valid 使用）。
     pub fn get_np(&self) -> Option<u32> {
         self.get_int(b"np")
     }
 
+    /// rq 标量 tag → f32（fq 路径由 phreq 计算，BAM 路径从 tag 读取）。
     pub fn get_rq(&self) -> Option<f32> {
         self.get_float(b"rq")
     }
 
-    pub fn get_dw(&self) -> Option<Vec<u32>> {
-        self.get_uint_list(b"dw")
-    }
-
-    pub fn get_ar(&self) -> Option<Vec<u32>> {
-        self.get_uint_list(b"ar")
-    }
-
-    pub fn get_cr(&self) -> Option<Vec<u32>> {
-        self.get_uint_list(b"cr")
-    }
-
-    pub fn get_nn(&self) -> Option<Vec<u32>> {
-        self.get_uint_list(b"nn")
-    }
-
-    pub fn get_be(&self) -> Option<Vec<u32>> {
-        self.get_uint_list(b"be")
-    }
-
     /// int 标量(I8/U8/I16/U16/I32/U32)→ u32,语义与 gskits `get_int` 一致。
-    pub fn get_int(&self, tag: &[u8; 2]) -> Option<u32> {
+    fn get_int(&self, tag: &[u8; 2]) -> Option<u32> {
         let tag = Tag::new(tag[0], tag[1]);
         match self.record.data().get(&tag)? {
             Value::Int8(v) => Some(*v as u32),
@@ -131,26 +105,10 @@ impl<'a> BamRecordExt<'a> {
     }
 
     /// float 标量 → f32,语义与 gskits `get_float` 一致。
-    pub fn get_float(&self, tag: &[u8; 2]) -> Option<f32> {
+    fn get_float(&self, tag: &[u8; 2]) -> Option<f32> {
         let tag = Tag::new(tag[0], tag[1]);
         match self.record.data().get(&tag)? {
             Value::Float(v) => Some(*v),
-            _ => None,
-        }
-    }
-
-    /// uint 数组(B:C/B:S/B:I)→ Vec<u32>,语义与 gskits `get_uint_list` 一致。
-    pub fn get_uint_list(&self, tag: &[u8; 2]) -> Option<Vec<u32>> {
-        use noodles::sam::alignment::record_buf::data::field::value::Array;
-
-        let tag = Tag::new(tag[0], tag[1]);
-        match self.record.data().get(&tag)? {
-            Value::Array(array) => match array {
-                Array::UInt8(v) => Some(v.iter().map(|&v| v as u32).collect()),
-                Array::UInt16(v) => Some(v.iter().map(|&v| v as u32).collect()),
-                Array::UInt32(v) => Some(v.to_vec()),
-                _ => None,
-            },
             _ => None,
         }
     }

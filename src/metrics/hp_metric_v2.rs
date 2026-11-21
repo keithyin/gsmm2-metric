@@ -179,19 +179,19 @@ impl HpMetricV2 {
         for (key, counter) in &self.metric_core {
             for (misc_idx, cnt) in counter.counts.iter().enumerate() {
                 cnt.iter().for_each(|(&called, &num)| {
-                    let mut innner_items =
+                    let mut cells =
                         vec![qname.to_string(), tname.to_string(), key.as_ref().clone()];
-                    innner_items.push(if misc_idx == 0 {
+                    cells.push(if misc_idx == 0 {
                         "pure".to_string()
                     } else {
                         "mixed".to_string()
                     });
 
-                    innner_items.push(format!("{}", called));
-                    innner_items.push(format!("{}", num));
-                    innner_items.push(format!("{}", counter.eq));
-                    innner_items.push(format!("{}", counter.align_span));
-                    result_items.push(join_row(&innner_items));
+                    cells.push(format!("{}", called));
+                    cells.push(format!("{}", num));
+                    cells.push(format!("{}", counter.eq));
+                    cells.push(format!("{}", counter.align_span));
+                    result_items.push(join_row(&cells));
                 });
             }
         }

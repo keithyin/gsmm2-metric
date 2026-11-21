@@ -24,7 +24,7 @@ use crate::{
         Metric, MetricContext, MetricOutcome, hp_metric_v2::HpMetricV2,
         hp_tr_metric_v2::HpTrMetricV2, hp_tr_metric_v3::HpTrMetricV3,
     },
-    msa::msa_entrence,
+    msa::msa_entrance,
     params::{InputFilterParams, OupParams},
 };
 
@@ -37,6 +37,18 @@ pub mod kits;
 pub mod metrics;
 pub mod msa;
 pub mod params;
+
+/// metric 管线的最低总线程数（1 读入 + N-2 计算/预留 + 1 落盘）。
+/// README 的「建议 ≥10 线程」与此对应。
+const MIN_THREADS: usize = 10;
+/// 读入/落盘两端的预留线程数；计算 worker 数 = 总线程 - 预留。
+const OUTPUT_THREAD_RESERVE: usize = 4;
+/// 读入 → 计算 → 落盘 各级 channel 的容量（背压上限）。
+const CHANNEL_CAP: usize = 1000;
+/// BAM 输入的 BGZF 解压 worker 数（等价 rust-htslib set_threads(4)）。
+const BAM_BGZF_WORKERS: usize = 4;
+/// 参与 metric 统计的 hit 最低 identity（same-target 过滤后应用）。
+const MIN_PRIMARY_IDENTITY: f32 = 0.75;
 
 fn main() {
     let mut cli = Cli::parse();
@@ -73,7 +85,7 @@ fn main() {
         }
 
         Mode::Bam2Msa => {
-            msa_entrence(&cli);
+            msa_entrance(&cli);
         }
     }
 }
@@ -83,7 +95,10 @@ where
     M: Metric,
 {
     let tot_threads = tot_threads.unwrap_or(num_cpus::get());
-    assert!(tot_threads >= 10, "at least 10 threads are needed");
+    assert!(
+        tot_threads >= MIN_THREADS,
+        "at least {MIN_THREADS} threads are needed"
+    );
 
     let (targetname2seq, aligner) = build_aligner(args, preset, Some(tot_threads));
 
@@ -98,18 +113,12 @@ where
         let aligner = &aligner;
         let input_filter_params = &inp_filter_params;
         let oup_params = &oup_params;
-        let (qs_sender, qs_recv) = crossbeam::channel::bounded(1000);
+        let (qs_sender, qs_recv) = crossbeam::channel::bounded(CHANNEL_CAP);
 
-        thread_scope.spawn(move || {
-            query_seq_sender(
-                &args.io_args.query,
-                qs_sender,
-                input_filter_params,
-                oup_params,
-            )
-        });
-        let metric_threads = tot_threads - 4;
-        let (metric_sender, metric_recv) = crossbeam::channel::bounded(1000);
+        thread_scope
+            .spawn(move || query_seq_sender(&args.io_args.query, qs_sender, input_filter_params));
+        let metric_threads = tot_threads - OUTPUT_THREAD_RESERVE;
+        let (metric_sender, metric_recv) = crossbeam::channel::bounded(CHANNEL_CAP);
 
         for _ in 0..metric_threads {
             thread_scope.spawn({
@@ -143,7 +152,6 @@ pub fn query_seq_sender(
     filenames: &[String],
     sender: Sender<ReadInfo>,
     input_filter_params: &InputFilterParams,
-    oup_params: &OupParams,
 ) {
     for (file_idx, filename) in filenames.iter().enumerate() {
         let qname_suffix = if filenames.len() == 1 {
@@ -161,16 +169,14 @@ pub fn query_seq_sender(
                 sender.send(record).unwrap();
             }
         } else if filename.ends_with("bam") {
-            // 等价于原 rust-htslib `set_threads(4)`:4 个 BGZF 解压 worker。
             let file = File::open(filename).unwrap();
-            let worker_count = std::num::NonZero::new(4).unwrap();
+            let worker_count = std::num::NonZero::new(BAM_BGZF_WORKERS).unwrap();
             let bgzf_reader = bgzf::io::MultithreadedReader::with_worker_count(worker_count, file);
             let mut bam_h = bam::io::Reader::from(bgzf_reader);
             let header = bam_h.read_header().unwrap();
             for record in bam_h.record_bufs(&header) {
                 let record = record.unwrap();
-                let mut read_info =
-                    ReadInfo::from_bam_record(&record, None, &oup_params.pass_through_tags);
+                let mut read_info = ReadInfo::from_bam_record(&record, None);
                 if input_filter_params.valid(&read_info) {
                     if let Some(suffix) = &qname_suffix {
                         read_info.name.push_str(suffix);
@@ -272,7 +278,7 @@ where
     let hits = hits
         .into_iter()
         .filter(|v| v.target_name.as_ref().unwrap() == &target_name)
-        .filter(|v| v.identity() > 0.75)
+        .filter(|v| v.identity() > MIN_PRIMARY_IDENTITY)
         .collect::<Vec<_>>();
 
     let mut metric = M::default();

@@ -145,6 +145,13 @@ pub fn from_bandmap(m: &bandmap::Mapping, query_name: Option<Arc<String>>) -> Ma
     }
 }
 
+/// reorder_like_mm2 排序时的链型优先级加分（对齐 mm2 的 flag 语义）。
+const PRIMARY_BONUS: i32 = 1_000_000_000;
+const SUPPLEMENTARY_BONUS: i32 = 100_000_000;
+/// supplementary 去重/判定的重叠比例阈值：与已收链的 query 重叠超过该值
+/// 视为重复（降级 secondary），否则保留 supplementary。
+const SUPP_OVLP_RATIO_THRESHOLD: f32 = 0.5;
+
 /// 复刻 mm2 `set_primary_supp_alignment_according_2_align_score` 的 hit 重排语义。
 ///
 /// 两引擎标注体系的对应关系：
@@ -189,7 +196,7 @@ fn reorder_like_mm2(hits: &mut [Mapping]) {
     hits.sort_by_key(|v| {
         -v.alignment_score.unwrap()
             - if v.is_primary && !v.is_supplementary {
-                1_000_000_000
+                PRIMARY_BONUS
             } else {
                 0
             }
@@ -204,16 +211,16 @@ fn reorder_like_mm2(hits: &mut [Mapping]) {
         if hit.is_primary {
             let ratio = ovlp_ratio(primary_qstart, primary_qend, hit.query_start, hit.query_end);
             hit.is_primary = false;
-            hit.is_supplementary = ratio <= 0.5;
+            hit.is_supplementary = ratio <= SUPP_OVLP_RATIO_THRESHOLD;
         }
     }
 
     hits.sort_by_key(|v| {
         -v.alignment_score.unwrap()
             - if v.is_primary && !v.is_supplementary {
-                1_000_000_000
+                PRIMARY_BONUS
             } else if v.is_supplementary {
-                100_000_000
+                SUPPLEMENTARY_BONUS
             } else {
                 0
             }
@@ -226,7 +233,7 @@ fn reorder_like_mm2(hits: &mut [Mapping]) {
             let cnt = visited_ranges
                 .iter()
                 .map(|&(range_s, range_e)| ovlp_ratio(range_s, range_e, start, end))
-                .filter(|&ovlp| ovlp > 0.5)
+                .filter(|&ovlp| ovlp > SUPP_OVLP_RATIO_THRESHOLD)
                 .count();
             if cnt > 0 {
                 v.is_supplementary = false;

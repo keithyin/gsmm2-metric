@@ -1,7 +1,5 @@
 //! gskits `dna` 模块的本地移植(仅保留本项目用到的 reverse_complement)。
 
-use std::mem::MaybeUninit;
-
 pub static COMPLEMENT_TABLE: [u8; 256] = {
     let mut table = [0u8; 256];
     table[b'A' as usize] = b'T';
@@ -25,15 +23,10 @@ pub static COMPLEMENT_TABLE: [u8; 256] = {
 
 /// b"ACGTAA" -> b"TTACGT"
 pub fn reverse_complement(dna: &[u8]) -> Vec<u8> {
-    let mut result: Vec<MaybeUninit<u8>> = vec![MaybeUninit::uninit(); dna.len()];
     dna.iter()
         .rev()
-        .zip(result.iter_mut())
-        .for_each(|(&base, slot)| {
-            let complement = COMPLEMENT_TABLE[base as usize];
-            slot.write(complement);
-        });
-    unsafe { std::mem::transmute(result) }
+        .map(|&base| COMPLEMENT_TABLE[base as usize])
+        .collect()
 }
 
 #[cfg(test)]

@@ -1,8 +1,6 @@
 //! 本地参数结构，字段与方法名与被移除的 mm2 0.25.6 `params.rs` 保持一致，
 //! cli.rs / 测试代码只改 use 路径即可。bandmap 侧的映射见 `aligner.rs`。
 
-use std::collections::HashSet;
-
 use crate::kits::{Range, ReadInfo};
 
 #[derive(Default)]
@@ -145,9 +143,6 @@ impl AlignParams {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct MapParams {}
-
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IndexParams {
     pub kmer: Option<usize>,
@@ -170,31 +165,13 @@ impl IndexParams {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OupParams {
-    pub discard_secondary: bool,
     pub discard_supplementary: bool,
-    pub oup_identity_threshold: f32,
-    pub oup_coverage_threshold: f32,
     /// --noMar：query 比对产生不止一个 chain（存在 supplementary 或 secondary
-    /// mapping）时，整条 query 过滤掉，不产出 metric 行。
-    /// 与 discard_secondary / discard_supplementary 相互独立（过滤判定发生在
-    /// 二者生效之前，main.rs `compute_metric`）。
+    /// mapping）时，整条 query 过滤掉，不产出 metric 行。过滤判定发生在
+    /// supplementary 过滤之前（main.rs `compute_metric`）。
     pub discard_multi_align_reads: bool,
-    pub pass_through_tags: HashSet<String>,
-}
-
-impl Default for OupParams {
-    fn default() -> Self {
-        Self {
-            discard_secondary: false,
-            discard_supplementary: false,
-            oup_identity_threshold: -1.0,
-            oup_coverage_threshold: -1.0,
-            discard_multi_align_reads: false,
-            pass_through_tags: HashSet::new(),
-        }
-    }
 }
 
 impl OupParams {
@@ -202,23 +179,11 @@ impl OupParams {
         Self::default()
     }
 
-    pub fn set_discard_secondary(mut self, discard_secondary: bool) -> Self {
-        self.discard_secondary = discard_secondary;
-        self
-    }
-
     pub fn set_discard_supplementary(mut self, discard_supplementary: bool) -> Self {
         self.discard_supplementary = discard_supplementary;
         self
     }
-    pub fn set_oup_identity_threshold(mut self, oup_identity_threshold: f32) -> Self {
-        self.oup_identity_threshold = oup_identity_threshold;
-        self
-    }
-    pub fn set_oup_coverage_threshold(mut self, oup_coverage_threshold: f32) -> Self {
-        self.oup_coverage_threshold = oup_coverage_threshold;
-        self
-    }
+
     pub fn set_discard_multi_align_reads(mut self, discard_multi_align_reads: bool) -> Self {
         self.discard_multi_align_reads = discard_multi_align_reads;
         self

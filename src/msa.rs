@@ -15,7 +15,7 @@ use crate::{
     },
 };
 
-pub fn msa_entrence(cli: &Cli) {
+pub fn msa_entrance(cli: &Cli) {
     let filepath = cli.metric_args.io_args.query[0].clone();
     // 等价于原 rust-htslib `set_threads(cli.threads.unwrap_or(num_cpus))`:
     // BGZF 解压 worker 数。
@@ -45,14 +45,11 @@ pub fn msa_entrence(cli: &Cli) {
 
     let major_pos_ins = compute_max_ins_of_each_ref_position(&all_records, Some(0), None);
 
-    // println!("major_pos_ins:{:?}", major_pos_ins);
-
     let mut major_pos_ins_vec = major_pos_ins
         .iter()
         .map(|(&k, &v)| (k as usize, v as usize))
         .collect::<Vec<_>>();
     major_pos_ins_vec.sort_by_key(|v| v.0);
-    // (0..(ins_size+1)).into_iter().collect::<Vec<_>>())
 
     let major = major_pos_ins_vec
         .iter()
@@ -97,8 +94,6 @@ fn compute_max_ins_of_each_ref_position(
     let rend = rend.map(|v| v as i64);
 
     for record in records {
-        // let query_locus_blacklist = get_query_locus_blacklist(record, query_locus_blacklist_gen);
-
         let record_ext = BamRecordExt::new(record);
         let mut start = rstart.unwrap_or(record_ext.reference_start() as i64);
         let mut end = rend.unwrap_or(record_ext.reference_end() as i64);
@@ -106,7 +101,6 @@ fn compute_max_ins_of_each_ref_position(
         end = end.max(record_ext.reference_end() as i64);
 
         let mut rpos_cursor = None;
-        // let mut qpos_cursor = None;
         let mut cur_ins = 0;
         let query_end = record_ext.query_alignment_end();
         let mut aligned_pair_full = aligned_pairs_full(record).collect::<Vec<_>>();
@@ -125,9 +119,6 @@ fn compute_max_ins_of_each_ref_position(
             if rpos.is_some() {
                 rpos_cursor = rpos;
             }
-            // if qpos.is_some() {
-            //     qpos_cursor = qpos;
-            // }
             if rpos_cursor.is_none() {
                 continue;
             }
@@ -136,7 +127,6 @@ fn compute_max_ins_of_each_ref_position(
                 continue;
             }
 
-            // print!("{},", rpos_cursor.unwrap());
             if rpos_cursor.unwrap() >= end {
                 // set the last rpos max ins and then break
                 let rpos_ = rpos_cursor.unwrap();
@@ -149,7 +139,6 @@ fn compute_max_ins_of_each_ref_position(
             if let Some(qpos_) = qpos
                 && qpos_ as usize >= query_end
             {
-                // println!("query hit end: {}", qpos_);
                 // set the last rpos max ins and then break
                 let rpos_ = rpos_cursor.unwrap();
 
@@ -193,7 +182,7 @@ impl Default for LocusBaseCounter {
 }
 
 impl LocusBaseCounter {
-    fn shanon_entropy(&self) -> f32 {
+    fn shannon_entropy(&self) -> f32 {
         let mut total_count = 0;
         for &count in self.counter.values() {
             total_count += count;
@@ -310,7 +299,7 @@ fn draw_msa(
 
     let entropy_str = all_locus_base_counter
         .iter()
-        .map(|locus| locus.shanon_entropy().to_string())
+        .map(|locus| locus.shannon_entropy().to_string())
         .collect::<Vec<_>>()
         .join(",");
 

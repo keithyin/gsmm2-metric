@@ -14,7 +14,7 @@ use regex::Regex;
 use crate::{
     adapter::{Mapping, Strand},
     aligned_pairs::TAlignedPairs,
-    global_data::{GlobalData, GlobalDataKey, GlobalDataValue},
+    global_data::GlobalData,
     kits::ReadInfo,
     kits::reverse_complement,
     metrics::hp_tr_tools::{do_align_4_homo, get_target_substr, shrink_to_motif_boundary},
@@ -86,23 +86,13 @@ pub fn realign_hit(
 ) -> Option<RealignedHit> {
     let target_name = mapping.target_name.as_ref().unwrap();
 
-    let global_data_value = global_data.get(GlobalDataKey::TargetName2SeqAndRev);
-    let [target_seq_fwd, target_seq_rev] = match global_data_value {
-        GlobalDataValue::TargetName2SeqAndRev(v) => v.get().unwrap().get(target_name).unwrap(),
-        _ => panic!("TargetName2SeqAndRev not found"),
-    };
+    let [target_seq_fwd, target_seq_rev] = global_data.seqs_with_rev().get(target_name).unwrap();
 
     // hp-tr 两个 mode：如果比对的 reference_start, reference_end 正好处于
     // hp-str 区域的中心位置，就从两头往中间缩。两个端点都落在同一个区域内时
     // 窗口会被缩成空，此时无法确定完整重复数，跳过该 hit。
     let shrunk = if cfg.shrink_to_boundary {
-        let global_data_value = global_data.get(GlobalDataKey::TargetRegion2Motif4HpTr);
-        let region2motif = match global_data_value {
-            GlobalDataValue::TargetRegion2Motif4HpTr(v) => {
-                v.get().unwrap().get(target_name).unwrap()
-            }
-            _ => panic!("TargetRegion2Motif4HpTr not found"),
-        };
+        let region2motif = global_data.region2motif_hptr().get(target_name).unwrap();
 
         let raw_target_start = mapping.target_start as usize;
         let raw_target_end = mapping.target_end as usize;
@@ -166,7 +156,7 @@ pub fn realign_hit(
 
     if !matches!(align.strand, Strand::Forward) {
         tracing::warn!(
-            "still reverse aligment. QueryName:{}. QueryStartEnd:{}-{}",
+            "still reverse alignment. QueryName:{}. QueryStartEnd:{}-{}",
             read_info.name,
             mapping.query_start,
             mapping.query_end,

@@ -100,13 +100,21 @@ pub fn get_target_substr<'a>(
     &ori_seq[start..end]
 }
 
+/// 重对齐（do_align_4_homo）的打分参数，与 mm2 版本一一对应：
+/// a=4 b=10 q=4 q2=24 e=2 e2=1。
+const REALIGN_MATCH_SCORE: i32 = 4;
+const REALIGN_MISMATCH_PENALTY: i32 = 10;
+const REALIGN_GAP_OPEN: i32 = 4;
+const REALIGN_GAP_OPEN2: i32 = 24;
+const REALIGN_GAP_EXTEND: i32 = 2;
+const REALIGN_GAP_EXTEND2: i32 = 1;
+
 pub fn do_align_4_homo(ori_query_seq: &str, target_substr: &str) -> Option<Mapping> {
     if ori_query_seq.is_empty() || target_substr.is_empty() {
         return None;
     }
 
-    // 与 mm2 版本参数一一对应：
-    // k=11 w=1；a=4 b=10 q=4 q2=24 e=2 e2=1；best_n=1；EQX cigar；只取 primary。
+    // k=11 w=1；best_n=1；EQX cigar；只取 primary。
     // mid_occ 保持 bandmap 校准（见 aligner.rs 的说明；mm2 内存索引写死的 1000
     // 不模仿——实测钉死会破坏合成数据一致性）。
     let mut aligner = bandmap::Aligner::builder(Preset::MapOnt)
@@ -119,12 +127,12 @@ pub fn do_align_4_homo(ori_query_seq: &str, target_substr: &str) -> Option<Mappi
         .unwrap();
 
     let scoring = &mut aligner.options_mut().scoring;
-    scoring.match_score = 4;
-    scoring.mismatch_penalty = 10;
-    scoring.gap_open = 4;
-    scoring.gap_open2 = 24;
-    scoring.gap_extend = 2;
-    scoring.gap_extend2 = 1;
+    scoring.match_score = REALIGN_MATCH_SCORE;
+    scoring.mismatch_penalty = REALIGN_MISMATCH_PENALTY;
+    scoring.gap_open = REALIGN_GAP_OPEN;
+    scoring.gap_open2 = REALIGN_GAP_OPEN2;
+    scoring.gap_extend = REALIGN_GAP_EXTEND;
+    scoring.gap_extend2 = REALIGN_GAP_EXTEND2;
     // mm2 重对齐的 map flags = [0x4000000(EQX), 0x40000000(MM_F_SAM_HIT_ONLY)]；
     // 后者只影响 SAM 输出不影响比对结果，无需在 bandmap 侧模仿。
     aligner.options_mut().filtering.best_n = 1;

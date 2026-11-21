@@ -1,6 +1,6 @@
 use std::{fs, path, str::FromStr};
 
-use crate::params::{AlignParams, IndexParams, InputFilterParams, MapParams, OupParams};
+use crate::params::{AlignParams, IndexParams, InputFilterParams, OupParams};
 use clap::{self, Args, Parser};
 
 #[derive(Debug, Parser, Clone)]
@@ -102,9 +102,6 @@ pub struct MetricArgs {
     pub index_args: IndexArgs,
 
     #[command(flatten)]
-    pub map_args: MapArgs,
-
-    #[command(flatten)]
     pub align_args: AlignArgs,
 
     #[command(flatten)]
@@ -196,15 +193,6 @@ impl IoArgs {
 }
 
 #[derive(Debug, Args, Clone, Default)]
-pub struct MapArgs {}
-
-impl MapArgs {
-    pub fn to_map_params(&self) -> MapParams {
-        MapParams::default()
-    }
-}
-
-#[derive(Debug, Args, Clone, Default)]
 pub struct AlignArgs {
     #[arg(short = 'm', help = "matching_score>=0, recommend 2")]
     matching_score: Option<i32>,
@@ -275,13 +263,8 @@ pub struct OupArgs {
 
 impl OupArgs {
     pub fn to_oup_params(&self) -> OupParams {
-        let mut param = OupParams::new();
-        param = param
-            .set_discard_secondary(true)
+        OupParams::new()
             .set_discard_supplementary(self.discard_supplementary)
-            .set_oup_identity_threshold(-1.0)
-            .set_oup_coverage_threshold(-1.0)
-            .set_discard_multi_align_reads(self.discard_multi_mapping_reads);
-        param
+            .set_discard_multi_align_reads(self.discard_multi_mapping_reads)
     }
 }

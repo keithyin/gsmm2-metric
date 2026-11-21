@@ -46,7 +46,7 @@ pub trait TAlignedPairs {
             self.query_start()
         };
 
-        let query_corsor_move_direction = if self.is_reverse() { -1 } else { 1 };
+        let query_cursor_move_direction = if self.is_reverse() { -1 } else { 1 };
 
         let mut target_cursor = self.target_start();
 
@@ -57,10 +57,10 @@ pub trait TAlignedPairs {
                 1 => {
                     // ins
                     let old_query_cursor = query_cursor;
-                    query_cursor += query_corsor_move_direction * cnt;
+                    query_cursor += query_cursor_move_direction * cnt;
                     Box::new((0..cnt).into_iter().map(move |shift| {
                         (
-                            Some(old_query_cursor + query_corsor_move_direction * shift),
+                            Some(old_query_cursor + query_cursor_move_direction * shift),
                             None,
                             op.into(),
                         )
@@ -80,13 +80,13 @@ pub trait TAlignedPairs {
                 }
                 7 | 8 => {
                     let old_query_cursor = query_cursor;
-                    query_cursor += query_corsor_move_direction * cnt;
+                    query_cursor += query_cursor_move_direction * cnt;
                     let old_target_cursor = target_cursor;
                     target_cursor += cnt;
 
                     Box::new((0..cnt).into_iter().map(move |shift| {
                         (
-                            Some(old_query_cursor + query_corsor_move_direction * shift),
+                            Some(old_query_cursor + query_cursor_move_direction * shift),
                             Some(old_target_cursor + shift),
                             op.into(),
                         )
