@@ -1,0 +1,59 @@
+# GitLab CI/CD
+# - test:所有 pipeline(main 分支 / MR / tag)上跑 cargo build + cargo test
+# - release:推送 v* tag 时,构建 release 二进制并打包上传到
+#   Generic Package Registry,再创建 GitLab Release 并挂资产链接。
+#
+# 项目已纯 Rust 化(不再依赖 hts-sys C 工具链),标准 rust 镜像即可。
+# edition 2024 需要 rustc >= 1.85,rust:1 跟随最新稳定版。
+
+stages:
+  - test
+  - release
+
+variables:
+  CARGO_TERM_COLOR: always
+  # GitLab cache 只能缓存项目内路径,把 CARGO_HOME 指到工作区内
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+
+default:
+  image: rust:1-bookworm
+  cache:
+    key:
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo/
+
+test:
+  stage: test
+  script:
+    - cargo build --verbose
+    - cargo test --verbose
+
+release:
+  stage: release
+  # 仅 v 开头的 tag 触发;先跑完 test 再打包
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  needs: [test]
+  script:
+    - cargo build --release
+    - tar czf "gsmm2-metric-${CI_COMMIT_TAG}-x86_64-linux.tar.gz" -C target/release gsmm2-metric
+    # 上传到 Generic Package Registry(通过 CI_JOB_TOKEN 鉴权)
+    - |
+      curl --fail --silent --show-error \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        --upload-file "gsmm2-metric-${CI_COMMIT_TAG}-x86_64-linux.tar.gz" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/gsmm2-metric/${CI_COMMIT_TAG}/gsmm2-metric-${CI_COMMIT_TAG}-x86_64-linux.tar.gz"
+  artifacts:
+    paths:
+      - "gsmm2-metric-${CI_COMMIT_TAG}-x86_64-linux.tar.gz"
+    expire_in: 1 week
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "gsmm2-metric $CI_COMMIT_TAG"
+    description: "Release $CI_COMMIT_TAG. See the tag annotation for the full changelog."
+    assets:
+      links:
+        - name: "gsmm2-metric-${CI_COMMIT_TAG}-x86_64-linux.tar.gz"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/gsmm2-metric/${CI_COMMIT_TAG}/gsmm2-metric-${CI_COMMIT_TAG}-x86_64-linux.tar.gz"
