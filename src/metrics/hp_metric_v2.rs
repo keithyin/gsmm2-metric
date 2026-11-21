@@ -3,11 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use hp_tr_finder::single_seq_hp_tr_finder;
 
 use crate::{
-    adapter::Mapping,
     aligned_pairs::{AlignOp, TAlignedPairs},
-    global_data::GlobalData,
     metrics::{
-        TMetric,
+        Metric, MetricContext, MetricOutcome, join_row,
         realign::{HP_REG, RealignConfig, realign_hit},
     },
 };
@@ -92,51 +90,29 @@ fn count_window(
 
 #[derive(Debug, Default)]
 pub struct HpMetricV2 {
-    qname: Option<String>,
-    tname: Option<Arc<String>>,
-    global_data: Option<Arc<GlobalData>>,
-    align_infos: Vec<Mapping>,
-    //Arc<String> for motif string. [fwd_counter, rev_counter]
+    //Arc<String> for motif string.
     metric_core: HashMap<Arc<String>, CounterWithAlignSpan>,
-    metric_str: Option<String>,
 }
 
-impl TMetric for HpMetricV2 {
-    fn csv_header() -> String {
-        let csv_header = [
-            "qname".to_string(),
-            "rname".to_string(),
-            "motif".to_string(),
-            "tag".to_string(),
-            "called".to_string(),
-            "num".to_string(),
-            "eq".to_string(),
-            "alignspan".to_string(),
-        ];
-        csv_header.join("\t")
-    }
+impl Metric for HpMetricV2 {
+    const COLUMNS: &'static [&'static str] = &[
+        "qname",
+        "rname",
+        "motif",
+        "tag",
+        "called",
+        "num",
+        "eq",
+        "alignspan",
+    ];
 
-    fn set_qname(&mut self, qname: String) {
-        self.qname = Some(qname);
-    }
-    fn get_qname(&self) -> &str {
-        self.qname.as_ref().unwrap()
-    }
-
-    fn set_global_data(&mut self, global_data: Arc<GlobalData>) {
-        self.global_data = Some(global_data);
-    }
-    fn get_global_data(&self) -> &GlobalData {
-        self.global_data.as_ref().unwrap()
-    }
-    fn compute_metric(&mut self, read_info: &crate::kits::ReadInfo, reference_anchored: bool) {
+    fn compute(&mut self, ctx: MetricContext) -> MetricOutcome {
         let cfg = RealignConfig {
             shrink_to_boundary: false,
-            reference_anchored,
+            reference_anchored: ctx.reference_anchored,
         };
-        for old_align_info in &self.align_infos {
-            let Some(hit) = realign_hit(read_info, old_align_info, self.get_global_data(), &cfg)
-            else {
+        for mapping in &ctx.mappings {
+            let Some(hit) = realign_hit(&ctx.read, mapping, &ctx.global_data, &cfg) else {
                 continue;
             };
 
@@ -173,14 +149,14 @@ impl TMetric for HpMetricV2 {
                     let aligned_len = align_info.query_end - align_info.query_start;
                     tracing::warn!(
                         "\n query_name:{}, motif:{}, baseCnt:{}, expectedCnt:{}, QueryStartEnd:{}-{}, TargetStartEnd:{}-{}\ntarget:{}\nquery :{}",
-                        read_info.name,
+                        ctx.read.name,
                         motif,
                         cnt,
                         expected_cnt,
-                        old_align_info.query_start + align_info.query_start,
-                        old_align_info.query_start + align_info.query_start + aligned_len,
-                        old_align_info.target_start,
-                        old_align_info.target_end,
+                        mapping.query_start + align_info.query_start,
+                        mapping.query_start + align_info.query_start + aligned_len,
+                        mapping.target_start,
+                        mapping.target_end,
                         aligned_target,
                         aligned_query
                     );
@@ -192,18 +168,19 @@ impl TMetric for HpMetricV2 {
                     .update(is_misc, cnt, eq, align_span);
             }
         }
-    }
 
-    fn build_metric_str(&mut self) -> String {
+        MetricOutcome::Rows(self.build_rows(&ctx.read.name, &ctx.target_name))
+    }
+}
+
+impl HpMetricV2 {
+    fn build_rows(&self, qname: &str, tname: &str) -> Vec<String> {
         let mut result_items = vec![];
         for (key, counter) in &self.metric_core {
             for (misc_idx, cnt) in counter.counts.iter().enumerate() {
                 cnt.iter().for_each(|(&called, &num)| {
-                    let mut innner_items = vec![];
-                    innner_items.push(self.qname.as_ref().unwrap().clone());
-                    innner_items.push(self.tname.as_ref().unwrap().as_ref().clone());
-                    innner_items.push(key.as_ref().clone());
-
+                    let mut innner_items =
+                        vec![qname.to_string(), tname.to_string(), key.as_ref().clone()];
                     innner_items.push(if misc_idx == 0 {
                         "pure".to_string()
                     } else {
@@ -214,28 +191,11 @@ impl TMetric for HpMetricV2 {
                     innner_items.push(format!("{}", num));
                     innner_items.push(format!("{}", counter.eq));
                     innner_items.push(format!("{}", counter.align_span));
-                    result_items.push(innner_items.join("\t"));
+                    result_items.push(join_row(&innner_items));
                 });
             }
         }
-        result_items.join("\n")
-    }
-    fn set_target_name(&mut self, target_name: Arc<String>) {
-        self.tname = Some(target_name);
-    }
-    fn get_target_name(&self) -> &str {
-        self.tname.as_ref().unwrap()
-    }
-
-    fn get_mappings_mut(&mut self) -> &mut Vec<Mapping> {
-        &mut self.align_infos
-    }
-
-    fn get_metric_str_mut(&mut self) -> &mut Option<String> {
-        &mut self.metric_str
-    }
-    fn get_metric_str(&self) -> &Option<String> {
-        &self.metric_str
+        result_items
     }
 }
 
@@ -253,7 +213,7 @@ mod test {
         aligned_pairs::AlignOp,
         aligner::build_aligner_from_params,
         global_data::GlobalData,
-        metrics::{TMetric, hp_metric_v2::HpMetricV2},
+        metrics::{Metric, MetricContext, MetricOutcome, hp_metric_v2::HpMetricV2},
         params::{AlignParams, IndexParams},
     };
 
@@ -312,15 +272,19 @@ mod test {
         assert!(!hits.is_empty(), "fwd query 应至少产生一个 hit");
 
         let mut metric = HpMetricV2::default();
-        metric.set_qname("query".to_string());
-        metric.set_target_name(Arc::new("target".to_string()));
-        metric.set_global_data(global_data.clone());
-        metric.set_mappings(hits);
-        metric.compute_metric(&fwd_query_record, false);
-        metric.set_metric_str();
-        println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
+        let outcome = metric.compute(MetricContext {
+            read: fwd_query_record,
+            target_name: Arc::new("target".to_string()),
+            mappings: hits,
+            global_data: global_data.clone(),
+            reference_anchored: false,
+        });
+        let MetricOutcome::Rows(rows) = outcome else {
+            panic!("expected rows");
+        };
+        println!("metric:\n{}", rows.join("\n"));
         assert_metric_rows(
-            metric.get_metric_str().as_ref().unwrap(),
+            &rows.join("\n"),
             &[
                 "query\ttarget\t(T)3\tpure\t3\t2\t6\t6",
                 "query\ttarget\t(A)3\tpure\t3\t2\t7\t9",
@@ -337,15 +301,19 @@ mod test {
         assert!(!hits.is_empty(), "rev query 应至少产生一个 hit");
 
         let mut metric = HpMetricV2::default();
-        metric.set_qname("query".to_string());
-        metric.set_target_name(Arc::new("target".to_string()));
-        metric.set_global_data(global_data.clone());
-        metric.set_mappings(hits);
-        metric.compute_metric(&rev_query_record, false);
-        metric.set_metric_str();
-        println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
+        let outcome = metric.compute(MetricContext {
+            read: rev_query_record,
+            target_name: Arc::new("target".to_string()),
+            mappings: hits,
+            global_data: global_data.clone(),
+            reference_anchored: false,
+        });
+        let MetricOutcome::Rows(rows) = outcome else {
+            panic!("expected rows");
+        };
+        println!("metric:\n{}", rows.join("\n"));
         assert_metric_rows(
-            metric.get_metric_str().as_ref().unwrap(),
+            &rows.join("\n"),
             &[
                 "query\ttarget\t(A)3\tpure\t2\t1\t2\t3",
                 "query\ttarget\t(A)4\tpure\t4\t1\t4\t4",

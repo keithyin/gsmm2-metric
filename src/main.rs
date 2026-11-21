@@ -21,8 +21,8 @@ use crate::{
         read_info::ReadInfo,
     },
     metrics::{
-        TMetric, hp_metric_v2::HpMetricV2, hp_tr_metric_v2::HpTrMetricV2,
-        hp_tr_metric_v3::HpTrMetricV3,
+        Metric, MetricContext, MetricOutcome, hp_metric_v2::HpMetricV2,
+        hp_tr_metric_v2::HpTrMetricV2, hp_tr_metric_v3::HpTrMetricV3,
     },
     msa::msa_entrence,
     params::{InputFilterParams, OupParams},
@@ -80,7 +80,7 @@ fn main() {
 
 fn metric_entrance<M>(preset: &str, tot_threads: Option<usize>, mode: Mode, args: &MetricArgs)
 where
-    M: TMetric,
+    M: Metric,
 {
     let tot_threads = tot_threads.unwrap_or(num_cpus::get());
     assert!(tot_threads >= 10, "at least 10 threads are needed");
@@ -131,7 +131,8 @@ where
         drop(qs_recv);
         drop(metric_sender);
         let oup_filename = args.get_oup_file(mode);
-        dump_metric_worker::<M>(metric_recv, &oup_filename, true);
+        let header = M::COLUMNS.join("\t");
+        dump_metric_worker(&header, metric_recv, &oup_filename, true);
     });
 }
 
@@ -198,20 +199,20 @@ pub fn query_seq_sender(
 
 pub fn compute_metric_worker<M>(
     receiver: Receiver<ReadInfo>,
-    sender: Sender<M>,
+    sender: Sender<MetricOutcome>,
     global_data: Arc<GlobalData>,
     aligner: &bandmap::Aligner,
     oup_params: &OupParams,
     ref_anchored: bool,
 ) where
-    M: TMetric,
+    M: Metric,
 {
     for query_record in receiver {
         let hits = adapter::align_single_query_to_targets(aligner, &query_record);
         sender
-            .send(compute_metric(
+            .send(compute_metric::<M>(
                 hits,
-                &query_record,
+                query_record,
                 oup_params,
                 global_data.clone(),
                 ref_anchored,
@@ -231,17 +232,14 @@ fn has_multiple_chains(hits: &[Mapping]) -> bool {
 
 pub fn compute_metric<M>(
     hits: Vec<Mapping>,
-    read_info: &ReadInfo,
+    read_info: ReadInfo,
     oup_params: &OupParams,
     global_data: Arc<GlobalData>,
     ref_anchored: bool,
-) -> M
+) -> MetricOutcome
 where
-    M: TMetric,
+    M: Metric,
 {
-    let mut metric = M::default();
-    metric.set_qname(read_info.name.clone());
-
     dump_hits_if_enabled(&hits);
 
     // --noMar：query 比对产生不止一个 chain（存在 supplementary/secondary）时，
@@ -254,8 +252,7 @@ where
             "noMar: query {} has supplementary/secondary chains, filtered",
             read_info.name
         );
-        metric.set_metric_str(); // 空 metric_core -> 空行 -> dump 跳过
-        return metric;
+        return MetricOutcome::Skipped;
     }
 
     let hits = hits
@@ -263,19 +260,14 @@ where
         .filter(|v| v.is_primary || (v.is_supplementary && !oup_params.discard_supplementary))
         .collect::<Vec<_>>();
 
-    let target_name = if !hits.is_empty() {
-        hits.iter()
-            .filter(|v| v.is_primary)
-            .take(1)
-            .map(|v| v.target_name.clone())
-            .collect::<Vec<_>>()[0]
-            .take()
-            .unwrap()
-    } else {
-        Arc::new("".to_string())
-    };
-
-    metric.set_target_name(target_name.clone());
+    // 取第一个 primary 的 target 名；hits 非空但无 primary 时回退为空串
+    // （不再越界 panic，见 bug-report.md Bug 7）。此时下游过滤后必为空，
+    // 不会产出任何行，回退值不影响输出。
+    let target_name = hits
+        .iter()
+        .find(|v| v.is_primary)
+        .and_then(|v| v.target_name.clone())
+        .unwrap_or_default();
 
     let hits = hits
         .into_iter()
@@ -283,11 +275,14 @@ where
         .filter(|v| v.identity() > 0.75)
         .collect::<Vec<_>>();
 
-    metric.set_global_data(global_data);
-    metric.set_mappings(hits);
-    metric.compute_metric(read_info, ref_anchored);
-    metric.set_metric_str();
-    metric
+    let mut metric = M::default();
+    metric.compute(MetricContext {
+        read: read_info,
+        target_name,
+        mappings: hits,
+        global_data,
+        reference_anchored: ref_anchored,
+    })
 }
 
 /// 调试用：设置环境变量 GSM2_DUMP_HITS 后，把每条 read 的全部 hits
@@ -321,15 +316,17 @@ fn dump_hits_if_enabled(hits: &[Mapping]) {
     }
 }
 
-pub fn dump_metric_worker<M>(metric_recv: Receiver<M>, fname: &str, enable_pb: bool)
-where
-    M: TMetric,
-{
+pub fn dump_metric_worker(
+    header: &str,
+    metric_recv: Receiver<MetricOutcome>,
+    fname: &str,
+    enable_pb: bool,
+) {
     let mut writer = BufWriter::new(
         File::create(fname).unwrap_or_else(|_| panic!("create file error: {}", fname)),
     );
 
-    writeln!(&mut writer, "{}", M::csv_header()).unwrap();
+    writeln!(&mut writer, "{}", header).unwrap();
 
     let pb = if enable_pb {
         Some(pbar::get_spin_pb(
@@ -340,13 +337,14 @@ where
         None
     };
 
-    for metric in metric_recv {
+    for outcome in metric_recv {
         if let Some(v) = pb.as_ref() {
             v.inc(1)
         }
-        let metric_str = metric.get_metric_str().as_ref().unwrap();
-        if !metric_str.is_empty() {
-            writeln!(&mut writer, "{}", metric_str).unwrap();
+        if let MetricOutcome::Rows(rows) = outcome {
+            for row in rows {
+                writeln!(&mut writer, "{}", row).unwrap();
+            }
         }
     }
 
