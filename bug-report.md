@@ -33,6 +33,8 @@ Review 范围：`src/` 全部 Rust 文件（main.rs、cli.rs、aligner.rs、glob
 
 修复建议：在 `main()` 的 `Cli::parse()` 之后调用 `let mut cli = Cli::parse(); cli.post_process_param();`。
 
+**修复情况（2026-11-21）**：已按建议修复——`src/main.rs` 中 `let mut cli = Cli::parse();` 后调用 `cli.post_process_param()`（只填充用户未显式指定的 `Option` 参数，显式传入的值不会被覆盖）。验证：15% mismatch 扰动的 60bp query（464 条）默认参数 23 行 → `--short-aln` 302 行，且与显式传 `--kmer 5 --wins 3 --min-cnt 3 --min-dp-max 20 --min-chain-score 5 --min-ksw-len 0` 的输出内容完全一致（仅多线程 dump 行序不同）；cargo test 24/24。
+
 ### Bug 3：多 fastq 输入时 qname 后缀被追加到「序列」而不是「名字」（依赖 mm2 的 bug）—— ✅ 已修复
 
 - 位置：mm2-0.25.6 `src/lib.rs:213-218`（`query_seq_sender` 的 fq 分支）：
@@ -301,7 +303,7 @@ let target_name = if hits.len() > 0 {
 
 ## 修复优先级建议
 
-1. ~~Bug 1（--noMar panic）~~：已于 2026-11-21 实现并修复（见上文「修复情况」）。Bug 2（--short-aln 无效）仍待修：一行级修复，立刻生效。
+1. ~~Bug 1（--noMar panic）~~：已于 2026-11-21 实现并修复（见上文「修复情况」）。~~Bug 2（--short-aln 无效）~~：已于 2026-11-21 修复（见上文「修复情况」）。
 2. ~~Bug 4（v3 q_start deletion 错位）~~：已于 2026-11-20 修复（见上文「修复情况」），并补充了边界 deletion 回归测试。
 3. ~~Bug 5（hp-v2 前后不对称）~~：已于 2026-11-20 修复（见上文「修复情况」），终点侧已与起点侧及 v3 口径对称。
 4. ~~Bug 3~~：已于 2026-11-19 在本仓库内修复（见上文「修复情况」），剩余事项：跑一遍双 fastq 端到端验证；mm2 升级到修复版本后清理本地实现。

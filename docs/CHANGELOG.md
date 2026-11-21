@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- `--short-aln` 实装：`post_process_param` 此前是死代码（定义于 `cli.rs` 但无任何调用点），传入后六个短比对参数（`kmer=5`/`wins=3`/`min_cnt=3`/`min_dp_max=20`/`min_chain_score=5`/`min_ksw_len=0`）全部不生效，短序列因默认 k=15/w=10 大量漏比对。修复为 `main()` 在 `Cli::parse()` 后调用 `cli.post_process_param()`；仅填充用户未显式指定的 `Option` 参数，显式值不被覆盖（[bug-report.md](../bug-report.md) Bug 2）。
 - `--noMar` 传入后程序启动即 panic：`OupParams` setter 的互斥断言与 `to_oup_params` 硬编码的 `set_discard_secondary(true)` 冲突（[bug-report.md](../bug-report.md) Bug 1）。
 
 ### Changed

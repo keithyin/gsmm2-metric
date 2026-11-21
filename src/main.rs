@@ -39,7 +39,8 @@ pub mod msa;
 pub mod params;
 
 fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    cli.post_process_param();
     let log_filepath = cli.metric_args.get_log_file(cli.mode);
     let log_file = std::fs::File::create(&log_filepath)
         .expect(&format!("create run log file error: {}", &log_filepath));
