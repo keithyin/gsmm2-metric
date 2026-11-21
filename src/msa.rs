@@ -3,7 +3,6 @@ use std::{
     collections::HashMap,
     fs,
     io::{BufWriter, Write},
-    usize,
 };
 
 use noodles::sam::alignment::RecordBuf;
@@ -23,8 +22,7 @@ pub fn msa_entrence(cli: &Cli) {
     let file = fs::File::open(&filepath).unwrap();
     let worker_count =
         std::num::NonZero::new(cli.threads.unwrap_or(num_cpus::get()).max(1)).unwrap();
-    let bgzf_reader =
-        noodles::bgzf::io::MultithreadedReader::with_worker_count(worker_count, file);
+    let bgzf_reader = noodles::bgzf::io::MultithreadedReader::with_worker_count(worker_count, file);
     let mut reader = noodles::bam::io::Reader::from(bgzf_reader);
     let header = reader.read_header().unwrap();
     let output_filepath = cli.metric_args.get_oup_file(cli.mode);
@@ -35,13 +33,10 @@ pub fn msa_entrence(cli: &Cli) {
     let pb = get_spin_pb(format!("reading {}", filepath), DEFAULT_INTERVAL);
     let all_records = reader
         .record_bufs(&header)
-        .into_iter()
-        .map(|rec| {
+        .inspect(|_rec| {
             pb.inc(1);
-            rec
         })
-        .filter(|rec| rec.is_ok())
-        .map(|rec| rec.unwrap())
+        .flatten()
         .filter(|rec| !rec.flags().is_unmapped())
         .filter(|rec| !rec.flags().is_secondary())
         .filter(|rec| !rec.flags().is_supplementary())
@@ -76,7 +71,7 @@ pub fn msa_entrence(cli: &Cli) {
     let major_pos2major_starting_point = major_pos_ins_vec
         .iter()
         .map(|&(ma, _)| ma)
-        .zip(major_start_point.into_iter())
+        .zip(major_start_point)
         .collect::<HashMap<_, _>>();
 
     let msa_len = major.len();
@@ -115,7 +110,7 @@ fn compute_max_ins_of_each_ref_position(
         let mut cur_ins = 0;
         let query_end = record_ext.query_alignment_end();
         let mut aligned_pair_full = aligned_pairs_full(record).collect::<Vec<_>>();
-        if aligned_pair_full.len() == 0 {
+        if aligned_pair_full.is_empty() {
             continue;
         }
 
@@ -151,17 +146,17 @@ fn compute_max_ins_of_each_ref_position(
                 break;
             }
 
-            if let Some(qpos_) = qpos {
-                if qpos_ as usize >= query_end {
-                    // println!("query hit end: {}", qpos_);
-                    // set the last rpos max ins and then break
-                    let rpos_ = rpos_cursor.unwrap();
+            if let Some(qpos_) = qpos
+                && qpos_ as usize >= query_end
+            {
+                // println!("query hit end: {}", qpos_);
+                // set the last rpos max ins and then break
+                let rpos_ = rpos_cursor.unwrap();
 
-                    pos2ins.entry(rpos_).or_insert(0);
-                    *pos2ins.get_mut(&rpos_).unwrap() =
-                        cmp::max(*pos2ins.get(&rpos_).unwrap(), cur_ins);
-                    break;
-                }
+                pos2ins.entry(rpos_).or_insert(0);
+                *pos2ins.get_mut(&rpos_).unwrap() =
+                    cmp::max(*pos2ins.get(&rpos_).unwrap(), cur_ins);
+                break;
             }
 
             if let Some(rpos_) = rpos {
@@ -220,7 +215,7 @@ impl LocusBaseCounter {
 }
 
 fn draw_msa(
-    records: &Vec<RecordBuf>,
+    records: &[RecordBuf],
     rstart: usize,
     rend: usize,
     major_pos2major_starting_point: &HashMap<usize, usize>,

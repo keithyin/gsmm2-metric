@@ -82,32 +82,36 @@ impl Mapping {
         let mut target_start = 0usize;
         let mut query_start = 0usize;
 
-        self.cigar.as_ref().unwrap().iter().for_each(|&(cnt, code)| {
-            let cnt = cnt as usize;
-            match code {
-                0 | 7 | 8 => {
-                    aligned_target.push_str(&sbr_target[target_start..target_start + cnt]);
-                    aligned_query.push_str(&sbr_query[query_start..query_start + cnt]);
-                    target_start += cnt;
-                    query_start += cnt;
+        self.cigar
+            .as_ref()
+            .unwrap()
+            .iter()
+            .for_each(|&(cnt, code)| {
+                let cnt = cnt as usize;
+                match code {
+                    0 | 7 | 8 => {
+                        aligned_target.push_str(&sbr_target[target_start..target_start + cnt]);
+                        aligned_query.push_str(&sbr_query[query_start..query_start + cnt]);
+                        target_start += cnt;
+                        query_start += cnt;
+                    }
+                    1 => {
+                        let ins = vec!["-"; cnt].join("");
+                        aligned_target.push_str(&ins);
+                        aligned_query.push_str(&sbr_query[query_start..query_start + cnt]);
+                        query_start += cnt;
+                    }
+                    2 => {
+                        let del = vec!["-"; cnt].join("");
+                        aligned_target.push_str(&sbr_target[target_start..target_start + cnt]);
+                        aligned_query.push_str(&del);
+                        target_start += cnt;
+                    }
+                    _ => {
+                        panic!("invalid code. {}", code);
+                    }
                 }
-                1 => {
-                    let ins = vec!["-"; cnt].join("");
-                    aligned_target.push_str(&ins);
-                    aligned_query.push_str(&sbr_query[query_start..query_start + cnt]);
-                    query_start += cnt;
-                }
-                2 => {
-                    let del = vec!["-"; cnt].join("");
-                    aligned_target.push_str(&sbr_target[target_start..target_start + cnt]);
-                    aligned_query.push_str(&del);
-                    target_start += cnt;
-                }
-                _ => {
-                    panic!("invalid code. {}", code);
-                }
-            }
-        });
+            });
 
         (aligned_target, aligned_query)
     }
@@ -153,7 +157,7 @@ pub fn from_bandmap(m: &bandmap::Mapping, query_name: Option<Arc<String>>) -> Ma
 /// - bandmap secondary → 保持 secondary。
 ///
 /// ovlp_ratio 与 mm2 相同：重叠长度 / min(两侧长度)。
-fn reorder_like_mm2(hits: &mut Vec<Mapping>) {
+fn reorder_like_mm2(hits: &mut [Mapping]) {
     if hits.is_empty() {
         return;
     }

@@ -23,7 +23,14 @@ struct Counter {
 }
 
 impl Counter {
-    pub fn update(&mut self, ref_repeats: usize, misc: bool, cnt: usize, eq: usize, align_span: usize) {
+    pub fn update(
+        &mut self,
+        ref_repeats: usize,
+        misc: bool,
+        cnt: usize,
+        eq: usize,
+        align_span: usize,
+    ) {
         let idx = if misc { 1 } else { 0 };
         *self.counts[idx].entry(cnt).or_default() += 1;
         self.ref_repeats = ref_repeats;
@@ -74,6 +81,7 @@ fn count_repeats(motif_unit: &[u8], query_substr: &[u8]) -> (usize, bool, usize)
 ///   - ref2qpos[i]：ref 局部位点 ts+i 对应的 query 位点；
 ///   - is_deleted[i]：ref2qpos[i] 是否来自 deletion 分支（该 ref 位点被删，
 ///     此时 ref2qpos[i] 是下一个 match 的 query 位点，而非该位点自身的坐标）。
+///
 /// indel 处理规则：
 ///   - deletion (ref 有, query 无)：ref_pos 指向下一个未 deletion 的 query 位点（query 游标不变）
 ///   - insertion (query 有, ref 无)：ref_pos 指向当前 ref 游标 rcur（上一个 match 的下一个 query 位点）
@@ -434,9 +442,10 @@ mod test {
 
         let global_data = Arc::new(GlobalData::new(targetname2seq));
 
-        let mut index_params = IndexParams::default();
-        index_params.kmer = Some(11);
-        index_params.wins = Some(1);
+        let index_params = IndexParams {
+            kmer: Some(11),
+            wins: Some(1),
+        };
 
         let align_params = AlignParams::default()
             .set_m_score(2)
@@ -503,9 +512,10 @@ mod test {
 
         let global_data = Arc::new(GlobalData::new(targetname2seq));
 
-        let mut index_params = IndexParams::default();
-        index_params.kmer = Some(11);
-        index_params.wins = Some(1);
+        let index_params = IndexParams {
+            kmer: Some(11),
+            wins: Some(1),
+        };
 
         let align_params = AlignParams::default()
             .set_m_score(2)
@@ -522,10 +532,7 @@ mod test {
             let mut read = ref_seq[0..174].to_vec();
             read.extend_from_slice(replacement);
             read.extend_from_slice(&ref_seq[182..300]);
-            ReadInfo::new_fa_record(
-                "query".to_string(),
-                String::from_utf8(read).unwrap(),
-            )
+            ReadInfo::new_fa_record("query".to_string(), String::from_utf8(read).unwrap())
         };
 
         // 3 个用例：(AC)6 扩张, (AC)3 收缩, (AC)4 + 1 个 substitution
@@ -587,9 +594,10 @@ mod test {
 
         let global_data = Arc::new(GlobalData::new(targetname2seq));
 
-        let mut index_params = IndexParams::default();
-        index_params.kmer = Some(11);
-        index_params.wins = Some(1);
+        let index_params = IndexParams {
+            kmer: Some(11),
+            wins: Some(1),
+        };
 
         let align_params = AlignParams::default()
             .set_m_score(2)
@@ -625,10 +633,8 @@ mod test {
         ];
 
         for (qname, read, exp_called, exp_misc) in cases {
-            let query_record = ReadInfo::new_fa_record(
-                "query".to_string(),
-                String::from_utf8(read).unwrap(),
-            );
+            let query_record =
+                ReadInfo::new_fa_record("query".to_string(), String::from_utf8(read).unwrap());
             let hits = adapter::align_single_query_to_targets(&aligner, &query_record);
 
             let mut metric = HpTrMetricV3::default();

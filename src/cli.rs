@@ -1,7 +1,7 @@
 use std::{fs, path, str::FromStr};
 
-use clap::{self, Args, Parser};
 use crate::params::{AlignParams, IndexParams, InputFilterParams, MapParams, OupParams};
+use clap::{self, Args, Parser};
 
 #[derive(Debug, Parser, Clone)]
 #[command(version, about, long_about=None)]
@@ -166,10 +166,10 @@ impl IoArgs {
                 mode
             )
         };
-        if let Some(dir) = path::Path::new(&out_fn).to_path_buf().parent() {
-            if !dir.exists() {
-                fs::create_dir_all(dir).unwrap();
-            }
+        if let Some(dir) = path::Path::new(&out_fn).to_path_buf().parent()
+            && !dir.exists()
+        {
+            fs::create_dir_all(dir).unwrap();
         }
 
         out_fn

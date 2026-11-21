@@ -1,4 +1,4 @@
-use std::{collections::HashMap, i64, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::kits::reverse_complement;
 use hp_tr_finder::{UnitAndRepeats, single_seq_hp_tr_finder};
@@ -13,18 +13,6 @@ use crate::{
         hp_tr_tools::{do_align_4_homo, get_target_substr},
     },
 };
-
-#[derive(Debug, Default)]
-struct Counter {
-    counts: [HashMap<usize, usize>; 2], // [pure, mixed]
-}
-
-impl Counter {
-    pub fn update(&mut self, misc: bool, cnt: usize) {
-        let idx = if misc { 1 } else { 0 };
-        *self.counts[idx].entry(cnt).or_default() += 1;
-    }
-}
 
 #[derive(Debug, Default)]
 struct CounterWithAlignSpan {
@@ -88,16 +76,16 @@ fn count_window(
             continue;
         }
 
-        if let Some(rpos) = rpos {
-            if rpos >= end as i64 {
-                break;
-            }
+        if let Some(rpos) = rpos
+            && rpos >= end as i64
+        {
+            break;
         }
 
-        if let (Some(qpos_), Some(_rpos_)) = (qpos, rpos) {
-            if read_seq_bytes[qpos_ as usize] == target_base {
-                eq += 1;
-            }
+        if let (Some(qpos_), Some(_rpos_)) = (qpos, rpos)
+            && read_seq_bytes[qpos_ as usize] == target_base
+        {
+            eq += 1;
         }
 
         if let Some(qpos) = qpos {
@@ -123,7 +111,7 @@ pub struct HpMetricV2 {
 
 impl TMetric for HpMetricV2 {
     fn csv_header() -> String {
-        let csv_header = vec![
+        let csv_header = [
             "qname".to_string(),
             "rname".to_string(),
             "motif".to_string(),
@@ -322,17 +310,34 @@ mod test {
 
     use crate::{
         adapter,
-        aligner::build_aligner_from_params,
         aligned_pairs::AlignOp,
+        aligner::build_aligner_from_params,
         global_data::GlobalData,
         metrics::{TMetric, hp_metric_v2::HpMetricV2},
         params::{AlignParams, IndexParams},
     };
 
+    /// 行序来自 HashMap 迭代（每次运行可能不同），排序后比较行集合。
+    /// 期望值以当前 Cargo.lock 锁定的 bandmap-core 基线为准；依赖升级导致
+    /// 变化时按新基线更新。
+    fn assert_metric_rows(metric_str: &str, expected_rows: &[&str]) {
+        let mut actual: Vec<&str> = metric_str.lines().collect();
+        actual.sort_unstable();
+        let mut expected: Vec<&str> = expected_rows.to_vec();
+        expected.sort_unstable();
+        assert_eq!(actual, expected, "metric 行集合与基线不一致");
+    }
+
+    fn ref_file() -> String {
+        format!(
+            "{}/test_data/ref_Saureus_ATCC25923.m.new.corrected.fasta",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    }
+
     #[test]
     fn test_hp_metric() {
-        let ref_file = "test_data/ref_Saureus_ATCC25923.m.new.corrected.fasta";
-        let fa_iter = FastaFileReader::new(ref_file.to_string());
+        let fa_iter = FastaFileReader::new(ref_file());
         let targets = read_fastx(fa_iter);
 
         let targetname2seq = targets
@@ -340,18 +345,14 @@ mod test {
             .map(|v| (Arc::new(v.name.clone()), Arc::new(v.seq.clone())))
             .collect::<HashMap<_, _>>();
 
-        let target_seq = targetname2seq
-            .values()
-            .take(1)
-            .map(|v| v)
-            .collect::<Vec<_>>()[0]
-            .clone();
+        let _target_seq = targetname2seq.values().take(1).collect::<Vec<_>>()[0].clone();
 
         let global_data = Arc::new(GlobalData::new(targetname2seq));
 
-        let mut index_params = IndexParams::default();
-        index_params.kmer = Some(11);
-        index_params.wins = Some(1);
+        let index_params = IndexParams {
+            kmer: Some(11),
+            wins: Some(1),
+        };
 
         let align_params = AlignParams::default();
         let mut aligner =
@@ -368,18 +369,7 @@ mod test {
         );
 
         let hits = adapter::align_single_query_to_targets(&aligner, &fwd_query_record);
-
-        // for hit in &hits {
-        //     let mapping_ext = MappingExt(hit);
-        //     let (aligned_target, aligned_query) =
-        //         mapping_ext.aligned_2_str(target_seq.as_bytes(), fwd_part);
-        //     println!(
-        //         "query_range:{}-{}, target_range:{}-{}, strand:{:?}",
-        //         hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand
-        //     );
-        //     println!("target:{}\nquery :{}", aligned_target, aligned_query);
-        //     println!("");
-        // }
+        assert!(!hits.is_empty(), "fwd query 应至少产生一个 hit");
 
         let mut metric = HpMetricV2::default();
         metric.set_qname("query".to_string());
@@ -389,6 +379,14 @@ mod test {
         metric.compute_metric(&fwd_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
+        assert_metric_rows(
+            metric.get_metric_str().as_ref().unwrap(),
+            &[
+                "query\ttarget\t(T)3\tpure\t3\t2\t6\t6",
+                "query\ttarget\t(A)3\tpure\t3\t2\t7\t9",
+                "query\ttarget\t(A)3\tpure\t1\t1\t7\t9",
+            ],
+        );
 
         let rev_query_record = ReadInfo::new_fa_record(
             "query".to_string(),
@@ -396,18 +394,7 @@ mod test {
         );
 
         let hits = adapter::align_single_query_to_targets(&aligner, &rev_query_record);
-
-        // for hit in &hits {
-        //     let mapping_ext = MappingExt(hit);
-        //     let (aligned_target, aligned_query) =
-        //         mapping_ext.aligned_2_str(target_seq.as_bytes(), rev_part);
-        //     println!(
-        //         "query_range:{}-{}, target_range:{}-{}, strand:{:?}",
-        //         hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand
-        //     );
-        //     println!("target:{}\nquery :{}", aligned_target, aligned_query);
-        //     println!("");
-        // }
+        assert!(!hits.is_empty(), "rev query 应至少产生一个 hit");
 
         let mut metric = HpMetricV2::default();
         metric.set_qname("query".to_string());
@@ -417,91 +404,17 @@ mod test {
         metric.compute_metric(&rev_query_record, false);
         metric.set_metric_str();
         println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
-    }
-
-    #[test]
-    fn test_hp_tr_metric_case() {
-        let ref_file = "test_data/ref_Saureus_ATCC25923.m.new.corrected.fasta";
-        let fa_iter = FastaFileReader::new(ref_file.to_string());
-        let targets = read_fastx(fa_iter);
-
-        let targetname2seq = targets
-            .iter()
-            .map(|v| (Arc::new(v.name.clone()), Arc::new(v.seq.clone())))
-            .collect::<HashMap<_, _>>();
-
-        let target_seq = targetname2seq
-            .values()
-            .take(1)
-            .map(|v| v)
-            .collect::<Vec<_>>()[0]
-            .clone();
-
-        let global_data = Arc::new(GlobalData::new(targetname2seq));
-
-        let mut index_params = IndexParams::default();
-        index_params.kmer = Some(11);
-        index_params.wins = Some(1);
-
-        let align_params = AlignParams::default();
-        let mut aligner =
-            build_aligner_from_params("map-ont", &index_params, &align_params, &targets);
-
-        aligner.options_mut().filtering.best_n = 100000;
-        aligner.options_mut().filtering.pri_ratio = 0.1;
-        let seq = b"AAGGGGGGGGGGGGGGGAAAAAGGGGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAATAAAAAAAAAAAAAAAAAAAAAAGGAAAAAAAGGAAAAAAAAAAAAAAAAAAAAGGGGAAAAAAAAAAGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGAAAAAAAAAAAAATTTTCCCCCCCAAAAAAAAAAAAACCCCCCCCCCCCCCTTGGGGGGGCGGGGGGGTTTTTTGGGGCATTGGGGGGGGGGGTGGGGGGGGGGGTTCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATAAAAAATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCCCCCCCCCCCAAAAAAAAAAAAAATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTTATTGGGGGGGGGTTTTTTTTTTTTTTTTTTTGGGGGGGGGGGGGCCCCCCCCCAAAATCCCCCCCCCCCTTTATCCCCCCCCCAAAAAAAAAAAAAATTTCCCCCCCCCCCCCCCCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAATTTTTTTTTCCCCCCCCCCCCCCCCCCCCCCCCAAAAAAACAACCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATATAAAAAAAAAAAAAAAAAAATTTTTTTTTGTGGGGGGGGGGGGGGGGGGGGGGGTGGGGGTTTTTCCCCCCCCCCCCCCAAAAATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGGGGGCCCCCCCCCCCTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATGTTTTTTGTTTAGGGGGGGGGGGGCCGCCCCGTTTTATTTTTTTTTTTTTAACACCAATTTTTTTTTATTTTTGGTTGGGTTTTCACATGAAAGCGGGCCGGGGGCAAAATTAAATTCGGGGGGGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAATTTTTTTTTTTTTTAAAAAAAAAAAAAAACAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGCTTTATTTTTTTTTTTTATAAAAAGGGGCTTTCTGTGAAATGAAGAACAAACAAAAATCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACACTTCTAAAAAAAAAACCCCCCCCCCCCAAAAAGGCCGGGGGGAAAAAAAAAAAAACCTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGCCGGAAAAAAAAAAAAAAAAAAAAAGGGGGCCGAATTCCCCCCTGCCGAAAAAAACAAAACGAAAAAGCAAAAAGAAAAAAACAAAAAAAACAACAAAAAACAAAAAAAAGCCCCTGCCCCCCCCCCCCCCTTTAAAACCACAAACAATTAGTTTTTAAACGAGGGGGTTTTTTTTTTTTTTTTTTTTTTTCGTAAACGCGTTATATTTTTTTTTTTTTACAACCTGTTAACCATTTTTTCTTAACGTCCTACAACATTTTTTTTCCCTCTTTTTTTAAAAAATAAAAAAAAAAAAAAAAAAAGAGGTCAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGCTGCTTTCATTTTTTGGGGCAAAAAAAAAAAGAAAACAAAAAAAAAAAAAAAACAAAAAAAAAACAAAAAAAAAAAAACAACCAACACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAACCAACACCCCGACAAAAAAACCCCCCCCAAAAAAAAAAAATTTTTTGGGGGGGGGGGGGGTTTTTTTTTTTTTTTTTTTTTTTTTTTCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCGGGCCCCCAAAAAAAAAAAAATTAGGGGGGGGGGGGGGGTGGTTTTTGGGGGGGTGGTGGGTTGGTTTTTTTGGGGGGGGGGGGGCGGTTTTTTTTTTTTTCCCCGGGGGCCCCCCCCCTTTTTTTTTTTTTTTTTTTTTTTTATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTAAAAAAAAAAAAAAAAAAATTTTTTTTTTTCTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTAATATTTTTTTTCCCCCCCCCCCCCCCCCCCCGGGGGGAAAGGGGGGCGGTTAAAAAATTTTTTTTTTTTTTTTTTTTTTTTATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTAATTTGGGGGGGGGGGGGGGGGGGAGGGGGGTTTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAGGGGGGGGGTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTTTTTTTTTTTTATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTCCCCCCCCCCCCCCCCCCCCCCCCCCCCCGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGGTTTATTTTTTTTTTTTTAATTTTTTTTTTTTTTTTTTTTTTTTTTATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTCCGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTTTTTTTTTTTAAAAAAAAAAAATTCCCCCCCCCCCCGGGGGGGGGGGGGGAAAATTTTTTTTTTTTTTTTTTTTTATTTTTTTTTTTTTTTTTTTTAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGGGGAAAAAAAAAATTTTTTTTTTTTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTTTTTTTTTTTTTTTTTTTTTAAAAAAAAAAAAAGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTTTTTATTTTTTTTTTTTTTTTTTTTTTTTTTTTTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCGGGGGGGGCCGGCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTTGGGGGGGGGGGGGGCCTTTTTTTTTTTTTTTTTTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCAAAAAAAAAAAATTTTTTTTTTGTTGTGGTGGGGGGGGGGGGGGGGGGGGGGGAAAGGGGGGGGGGGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAGGGGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGGGGGGGGGGGGTTTTTTATTTTTTTTAAAAAAAAAAAAAAAAAAAAAAAAAAAAATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTGGGGGAAAAAAAACCCCCTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTATTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCGCCCCCCCCCCATAGGAGGGGGGGCCCCCGTTTATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTAAAAAAAAAAAAAAAAAAAAAAAGTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGCCCCCCCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATGCCCCCAAAAAAAAAAAAAAAATTAAAAAAAAAAAAAAAAAAAAAAAAAAGGGTTTTAAAAAAAAAAAAAAAAAAAAAAAATAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGGGGTCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAGGGGGGGGGCCCCGCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGCCCAAAAAAAAGGGGGGCCCCCCCCCCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGTTTTTTTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGGGGGCCCCAAAAAAAAAAAAAAAAATTTTTTTTTTTTTTTTTTTTTTTTATTTTTTTGGGGGGGGGAAAAAAAAACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCACCCCCCCAAAAAAAAAAAATTTTTTTCCCAAAAAAAAAAAAAAAAGGGGGGGGAAATCCCCCCCCCCCCGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAGGGGGGGGGAAAAAATTCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGGGAAAAAAAAAAAAAAAAAAAAAAAAAAGGGGAAAAAAAAAAAAAAAAAAAGGGAAGGGGGGGGGAAATTTCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        let fwd_part = &seq[..];
-        let rev_part = &seq[1074..1074 + 100];
-        let fwd_query_record = ReadInfo::new_fa_record(
-            "query".to_string(),
-            String::from_utf8(fwd_part.to_vec()).unwrap(),
+        assert_metric_rows(
+            metric.get_metric_str().as_ref().unwrap(),
+            &[
+                "query\ttarget\t(A)3\tpure\t2\t1\t2\t3",
+                "query\ttarget\t(A)4\tpure\t4\t1\t4\t4",
+                "query\ttarget\t(C)3\tpure\t1\t1\t1\t3",
+                "query\ttarget\t(T)3\tpure\t3\t2\t9\t11",
+                "query\ttarget\t(T)3\tpure\t5\t1\t9\t11",
+                "query\ttarget\t(T)5\tpure\t5\t1\t5\t5",
+            ],
         );
-
-        let hits = adapter::align_single_query_to_targets(&aligner, &fwd_query_record);
-
-        for hit in &hits {
-            let (aligned_target, aligned_query) =
-                hit.aligned_2_str(target_seq.as_bytes(), fwd_part);
-            println!(
-                "query_range:{}-{}, target_range:{}-{}, strand:{:?}, identity:{}",
-                hit.query_start,
-                hit.query_end,
-                hit.target_start,
-                hit.target_end,
-                hit.strand,
-                hit.identity()
-            );
-            println!("target:{}\nquery :{}", aligned_target, aligned_query);
-            println!("");
-        }
-
-        let mut metric = HpMetricV2::default();
-        metric.set_qname("query".to_string());
-        metric.set_target_name(Arc::new("target".to_string()));
-        metric.set_global_data(global_data.clone());
-        metric.set_mappings(hits);
-        metric.compute_metric(&fwd_query_record, false);
-        metric.set_metric_str();
-        println!("metric:\n{}", metric.get_metric_str().as_ref().unwrap());
-
-        // let rev_query_record = ReadInfo::new_fa_record(
-        //     "query".to_string(),
-        //     String::from_utf8(rev_part.to_vec()).unwrap(),
-        // );
-
-        // let hits = align_single_query_to_targets(&rev_query_record, &aligners);
-
-        // for hit in &hits {
-        //     let mapping_ext = MappingExt(hit);
-        //     let (aligned_target, aligned_query) =
-        //         mapping_ext.aligned_2_str(target_seq.as_bytes(), rev_part);
-        //     println!(
-        //         "query_range:{}-{}, target_range:{}-{}, strand:{:?}",
-        //         hit.query_start, hit.query_end, hit.target_start, hit.target_end, hit.strand
-        //     );
-        //     println!("target:{}\nquery :{}", aligned_target, aligned_query);
-        //     println!("");
-        // }
     }
 
     // ---- count_window 回归测试（手造 aligned_pairs，Bug 5）----

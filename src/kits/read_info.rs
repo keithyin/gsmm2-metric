@@ -30,10 +30,11 @@ pub struct ReadInfo {
 
 impl ReadInfo {
     pub fn new_fa_record(name: String, seq: String) -> Self {
-        let mut res = Self::default();
-        res.name = name;
-        res.seq = seq;
-        res
+        Self {
+            name,
+            seq,
+            ..Default::default()
+        }
     }
 
     pub fn new_fq_record(name: String, seq: String, qual: Vec<u8>) -> Self {

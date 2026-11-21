@@ -125,7 +125,7 @@ impl<'a> BamRecordExt<'a> {
             Value::Int16(v) => Some(*v as u32),
             Value::UInt16(v) => Some(*v as u32),
             Value::Int32(v) => Some(*v as u32),
-            Value::UInt32(v) => Some(*v as u32),
+            Value::UInt32(v) => Some(*v),
             _ => None,
         }
     }
@@ -148,7 +148,7 @@ impl<'a> BamRecordExt<'a> {
             Value::Array(array) => match array {
                 Array::UInt8(v) => Some(v.iter().map(|&v| v as u32).collect()),
                 Array::UInt16(v) => Some(v.iter().map(|&v| v as u32).collect()),
-                Array::UInt32(v) => Some(v.iter().map(|&v| v as u32).collect()),
+                Array::UInt32(v) => Some(v.to_vec()),
                 _ => None,
             },
             _ => None,
@@ -297,11 +297,7 @@ mod test {
         let pairs: Vec<_> = aligned_pairs_full(&record).collect();
         assert_eq!(
             pairs,
-            vec![
-                [Some(0), Some(0)],
-                [Some(1), Some(1)],
-                [Some(2), Some(2)]
-            ]
+            vec![[Some(0), Some(0)], [Some(1), Some(1)], [Some(2), Some(2)]]
         );
     }
 }

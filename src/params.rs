@@ -31,26 +31,24 @@ impl InputFilterParams {
     /// np/rq/qname 已在构建 `ReadInfo` 时从 BAM record 解出,
     /// fa/fq 分支的 `ReadInfo` 字段为 None,自然不会被 np/rq 过滤。
     pub fn valid(&self, record: &ReadInfo) -> bool {
-        if let Some(np_range_) = &self.np_range {
-            if let Some(np) = record.np {
-                if !np_range_.within_range(np as i32) {
-                    return false;
-                }
-            }
+        if let Some(np_range_) = &self.np_range
+            && let Some(np) = record.np
+            && !np_range_.within_range(np as i32)
+        {
+            return false;
         }
 
-        if let Some(rq_range_) = &self.rq_range {
-            if let Some(rq) = record.rq {
-                if !rq_range_.within_range(rq) {
-                    return false;
-                }
-            }
+        if let Some(rq_range_) = &self.rq_range
+            && let Some(rq) = record.rq
+            && !rq_range_.within_range(rq)
+        {
+            return false;
         }
 
-        if let Some(qname_suffix) = &self.qname_suffix {
-            if !record.name.ends_with(qname_suffix) {
-                return false;
-            }
+        if let Some(qname_suffix) = &self.qname_suffix
+            && !record.name.ends_with(qname_suffix)
+        {
+            return false;
         }
 
         true

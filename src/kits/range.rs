@@ -16,17 +16,17 @@ where
             let items = single_range
                 .trim()
                 .split(":")
-                .filter(|item| item.trim().len() != 0)
+                .filter(|item| !item.trim().is_empty())
                 .collect::<Vec<_>>();
             if items.len() == 2 {
                 (
-                    items[0].parse::<T>().expect(&format!("{}", items[0])),
-                    items[1].parse::<T>().expect(&format!("{}", items[1])),
+                    items[0].parse::<T>().expect(items[0]),
+                    items[1].parse::<T>().expect(items[1]),
                 )
             } else {
                 (
-                    items[0].parse::<T>().expect(&format!("{}", items[0])),
-                    items[0].parse::<T>().expect(&format!("{}", items[0])),
+                    items[0].parse::<T>().expect(items[0]),
+                    items[0].parse::<T>().expect(items[0]),
                 )
             }
         })

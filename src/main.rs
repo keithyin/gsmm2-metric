@@ -43,7 +43,7 @@ fn main() {
     cli.post_process_param();
     let log_filepath = cli.metric_args.get_log_file(cli.mode);
     let log_file = std::fs::File::create(&log_filepath)
-        .expect(&format!("create run log file error: {}", &log_filepath));
+        .unwrap_or_else(|_| panic!("create run log file error: {}", log_filepath));
     let (non_blocking, _guard) = tracing_appender::non_blocking(log_file);
 
     let time_fmt = time::format_description::parse(
@@ -51,8 +51,7 @@ fn main() {
     )
     .unwrap();
 
-    let time_offset =
-        time::UtcOffset::current_local_offset().unwrap_or_else(|_| time::UtcOffset::UTC);
+    let time_offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
     let timer = tracing_subscriber::fmt::time::OffsetTime::new(time_offset, time_fmt.clone());
     tracing_subscriber::fmt::fmt()
         .with_timer(timer)
@@ -140,13 +139,12 @@ where
 /// 追加到了 `record.seq` 而不是 `record.name`，会污染 read 序列且无法区分多文件
 /// 来源。这里在本仓库内重新实现一份并修复该问题；fa / bam 分支行为与 mm2 保持一致。
 pub fn query_seq_sender(
-    filenames: &Vec<String>,
+    filenames: &[String],
     sender: Sender<ReadInfo>,
     input_filter_params: &InputFilterParams,
     oup_params: &OupParams,
 ) {
-    let mut file_idx = 0;
-    for filename in filenames {
+    for (file_idx, filename) in filenames.iter().enumerate() {
         let qname_suffix = if filenames.len() == 1 {
             None
         } else {
@@ -195,8 +193,6 @@ pub fn query_seq_sender(
                 filename
             );
         }
-
-        file_idx += 1;
     }
 }
 
@@ -267,7 +263,7 @@ where
         .filter(|v| v.is_primary || (v.is_supplementary && !oup_params.discard_supplementary))
         .collect::<Vec<_>>();
 
-    let target_name = if hits.len() > 0 {
+    let target_name = if !hits.is_empty() {
         hits.iter()
             .filter(|v| v.is_primary)
             .take(1)
@@ -289,7 +285,7 @@ where
 
     metric.set_global_data(global_data);
     metric.set_mappings(hits);
-    metric.compute_metric(&read_info, ref_anchored);
+    metric.compute_metric(read_info, ref_anchored);
     metric.set_metric_str();
     metric
 }
@@ -329,8 +325,9 @@ pub fn dump_metric_worker<M>(metric_recv: Receiver<M>, fname: &str, enable_pb: b
 where
     M: TMetric,
 {
-    let mut writer =
-        BufWriter::new(File::create(fname).expect(&format!("create file error: {}", fname)));
+    let mut writer = BufWriter::new(
+        File::create(fname).unwrap_or_else(|_| panic!("create file error: {}", fname)),
+    );
 
     writeln!(&mut writer, "{}", M::csv_header()).unwrap();
 
@@ -344,14 +341,18 @@ where
     };
 
     for metric in metric_recv {
-        pb.as_ref().map(|v| v.inc(1));
+        if let Some(v) = pb.as_ref() {
+            v.inc(1)
+        }
         let metric_str = metric.get_metric_str().as_ref().unwrap();
         if !metric_str.is_empty() {
             writeln!(&mut writer, "{}", metric_str).unwrap();
         }
     }
 
-    pb.as_ref().map(|v| v.finish());
+    if let Some(v) = pb.as_ref() {
+        v.finish()
+    }
 }
 
 #[cfg(test)]
@@ -387,13 +388,22 @@ mod test {
         assert!(!has_multiple_chains(&[mapping(true, false)]));
 
         // primary + supplementary（分裂比对）：过滤
-        assert!(has_multiple_chains(&[mapping(true, false), mapping(false, true)]));
+        assert!(has_multiple_chains(&[
+            mapping(true, false),
+            mapping(false, true)
+        ]));
 
         // primary + secondary（多位点 alt chain）：过滤
-        assert!(has_multiple_chains(&[mapping(true, false), mapping(false, false)]));
+        assert!(has_multiple_chains(&[
+            mapping(true, false),
+            mapping(false, false)
+        ]));
 
         // reorder_like_mm2 归一后的「假 primary」（bandmap is_primary&&is_supp
         // 已被归一为非 primary）：同样视为多余 chain
-        assert!(has_multiple_chains(&[mapping(true, false), mapping(true, true)]));
+        assert!(has_multiple_chains(&[
+            mapping(true, false),
+            mapping(true, true)
+        ]));
     }
 }

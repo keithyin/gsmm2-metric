@@ -45,10 +45,10 @@ pub trait TMetric: Send + 'static + Default {
 lazy_static::lazy_static! {
     pub static ref BASE_COMP: HashMap<u8, u8> = {
         let mut  m = HashMap::new();
-        m.insert('A' as u8, 'T' as u8);
-        m.insert('C' as u8, 'G' as u8);
-        m.insert('G' as u8, 'C' as u8);
-        m.insert('T' as u8, 'A' as u8);
+        m.insert(b'A', b'T');
+        m.insert(b'C', b'G');
+        m.insert(b'G', b'C');
+        m.insert(b'T', b'A');
         m
     };
 }

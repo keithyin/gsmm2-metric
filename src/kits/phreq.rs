@@ -1,7 +1,7 @@
 //! gskits `phreq` 模块的本地移植(仅保留本项目用到的 phreq_list_2_quality)。
 
 pub fn phreq_list_2_quality(baseq: &[u8]) -> Option<f32> {
-    if baseq.len() == 0 {
+    if baseq.is_empty() {
         return None;
     }
     let length = baseq.len() as f64;

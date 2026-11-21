@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
-use bandmap::Preset;
 use crate::kits::fastx::{FastaFileReader, read_fastx};
+use bandmap::Preset;
 
 use crate::{
     cli::MetricArgs,

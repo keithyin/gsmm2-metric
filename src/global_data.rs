@@ -5,6 +5,13 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::metrics::hp_tr_metric_v2::HP_TR_REG;
 
+/// ref 位点 -> 覆盖该位点的 motif 区间（HP-TR 用 flatten 后的 HashMap 索引）。
+pub type TargetRegion2Motif4HpTrMap =
+    HashMap<Arc<String>, Arc<HashMap<usize, Vec<((usize, usize), Arc<String>)>>>>;
+/// HP 用 IntervalTree 索引。
+pub type TargetRegion2Motif4HpMap =
+    HashMap<Arc<String>, Arc<hp_tr_finder::intervaltree::IntervalTree<usize, Arc<String>>>>;
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GlobalDataKey {
     TargetName2Seq,
@@ -22,17 +29,9 @@ pub enum GlobalDataValue {
     TargetName2Seq(sync::OnceCell<HashMap<Arc<String>, Arc<String>>>),
     TargetName2SeqAndRev(sync::OnceCell<HashMap<Arc<String>, [Arc<String>; 2]>>),
 
-    TargetRegion2Motif4HpTr(
-        sync::OnceCell<
-            HashMap<Arc<String>, Arc<HashMap<usize, Vec<((usize, usize), Arc<String>)>>>>,
-        >,
-    ),
+    TargetRegion2Motif4HpTr(sync::OnceCell<TargetRegion2Motif4HpTrMap>),
 
-    TargetRegion2Motif4Hp(
-        sync::OnceCell<
-            HashMap<Arc<String>, Arc<hp_tr_finder::intervaltree::IntervalTree<usize, Arc<String>>>>,
-        >,
-    ),
+    TargetRegion2Motif4Hp(sync::OnceCell<TargetRegion2Motif4HpMap>),
 }
 
 #[derive(Debug)]
@@ -99,13 +98,13 @@ impl GlobalData {
 
             GlobalDataValue::TargetRegion2Motif4HpTr(target_region2motif) => {
                 target_region2motif.get_or_init(|| {
-                    let region2motif: HashMap<
-                        Arc<String>,
-                        Arc<HashMap<usize, Vec<((usize, usize), Arc<String>)>>>,
-                    > = all_seq_hp_tr_finder(&HP_TR_REG, &self.target_name2seq)
-                        .into_iter()
-                        .map(|(seqname, region2motif)| (seqname, Arc::new(region2motif.flatten())))
-                        .collect::<HashMap<_, _>>();
+                    let region2motif: TargetRegion2Motif4HpTrMap =
+                        all_seq_hp_tr_finder(&HP_TR_REG, &self.target_name2seq)
+                            .into_iter()
+                            .map(|(seqname, region2motif)| {
+                                (seqname, Arc::new(region2motif.flatten()))
+                            })
+                            .collect::<HashMap<_, _>>();
                     region2motif
                 });
             }
@@ -113,15 +112,13 @@ impl GlobalData {
             GlobalDataValue::TargetRegion2Motif4Hp(target_region2motif) => {
                 target_region2motif.get_or_init(|| {
                     let all_regs = vec![UnitAndRepeats::new(1, 3).build_finder_regrex()];
-                    let region2motif: HashMap<
-                        Arc<String>,
-                        Arc<hp_tr_finder::intervaltree::IntervalTree<usize, Arc<String>>>,
-                    > = all_seq_hp_tr_finder(&all_regs, &self.target_name2seq)
-                        .into_iter()
-                        .map(|(seqname, region2motif)| {
-                            (seqname, Arc::new(region2motif.to_interval_search_tree()))
-                        })
-                        .collect::<HashMap<_, _>>();
+                    let region2motif: TargetRegion2Motif4HpMap =
+                        all_seq_hp_tr_finder(&all_regs, &self.target_name2seq)
+                            .into_iter()
+                            .map(|(seqname, region2motif)| {
+                                (seqname, Arc::new(region2motif.to_interval_search_tree()))
+                            })
+                            .collect::<HashMap<_, _>>();
                     region2motif
                 });
             }
