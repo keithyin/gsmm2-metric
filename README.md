@@ -33,7 +33,7 @@ gsmm2-metric --mode hp-tr-v3 \
 | `hp-tr-v2` | [hp_tr_metric_v2.rs](src/metrics/hp_tr_metric_v2.rs) | **比对算子谱**：motif 区域内的 eq/diff/ins/del | `qname rname motif eq diff ins del` |
 | `hp-tr-v3` | [hp_tr_metric_v3.rs](src/metrics/hp_tr_metric_v3.rs) | **重复数分布**：ref repeats vs called repeats | `qname rname motif tag ref called num eq alignspan` |
 | `hp-v2` | [hp_metric_v2.rs](src/metrics/hp_metric_v2.rs) | **HP 重复数分布**（仅 unit 长度 1） | `qname rname motif tag called num eq alignspan` |
-| `bam2-msa` | [msa.rs](src/msa.rs) | 不走 `TMetric`，由 bam 生成 MSA fasta + 逐列 Shannon 熵 | `.fasta` / `.shannon.txt` |
+| `bam2-msa` | [msa.rs](src/msa.rs) | 不走 `Metric`，由 bam 生成 MSA fasta + 逐列 Shannon 熵 | `.fasta` / `.shannon.txt` |
 
 ## 共用流水线
 
@@ -42,11 +42,11 @@ gsmm2-metric --mode hp-tr-v3 \
 1. read 比对到 target（bandmap-core，纯 Rust 实现的 minimap2 风格 mapper；`--preset` / `-m -M -o -e` 控制打分）。
 2. `--noMar` 先行判定：比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时整条 read 过滤掉，不产出输出行；否则保留 primary（以及未开启 `--noSupp` 时的 supplementary），只保留与 primary **同一个 target** 的 hit，并且 `identity > 0.75`（[main.rs](src/main.rs) 的 `compute_metric`）。
 3. 每个 hit 依次执行下面的「mode 无关前缀」：
-   1. **motif 边界收缩**：如果比对端点落在某个 HP/TR 区域内部，就把端点收缩到该区域的边界，避免 flank 干扰重对齐。查的是 `GlobalDataKey::TargetRegion2Motif4HpTr`（按 reference 位点建索引，见 [global_data.rs:100-111](src/global_data.rs#L100-L111)）。仅 `hp-tr-v2` / `hp-tr-v3` 做这一步，`hp-v2` 不做。
+   1. **motif 边界收缩**：如果比对端点落在某个 HP/TR 区域内部，就把端点收缩到该区域的边界，避免 flank 干扰重对齐。查的是 `GlobalData::region2motif_hptr`（按 reference 位点建索引，见 [global_data.rs](src/global_data.rs)）。仅 `hp-tr-v2` / `hp-tr-v3` 做这一步，`hp-v2` 不做。
    2. `get_target_substr()`：取 target 子串；如果切片边界落在同种碱基内部，再往内收缩 1~n 个碱基，保证窗口不切断 homopolymer（[hp_tr_tools.rs:16-49](src/metrics/hp_tr_tools.rs#L16-L49)）。
    3. `--refAnchored` 且 hit 是 reverse 时，read 子串和 target 子串一起反向互补。
    4. `do_align_4_homo()`：以 target 子串为 reference 重新做一次 Smith-Waterman 式精比对（固定参数 `a=4 b=10 q=4 q2=24 e=2 e2=1 k=11 w=1`，只取 primary）。重对齐失败或仍然是 reverse 的结果直接跳过并打 warn。
-   5. 在 **target 子串**（即 reference 侧）上跑 `single_seq_hp_tr_finder()` 找 motif。正则表 `HP_TR_REG` = unit 长度 1~4、最少 3 次重复（[hp_tr_metric_v2.rs:37-46](src/metrics/hp_tr_metric_v2.rs#L37-L46)），`hp-v2` 只用 unit 长度 1。`hp_tr_finder` 内部会做 `dedup_overlaps`：一个区域只保留最长的那条注释（`(AT)23` 会吃掉同区域的 `(TA)22`、`(TATA)11`）。
+   5. 在 **target 子串**（即 reference 侧）上跑 `single_seq_hp_tr_finder()` 找 motif。正则表 `HP_TR_REG` = unit 长度 1~4、最少 3 次重复（由 [realign.rs](src/metrics/realign.rs) 的 `MotifSpec` 派生），`hp-v2` 只用 unit 长度 1。`hp_tr_finder` 内部会做 `dedup_overlaps`：一个区域只保留最长的那条注释（`(AT)23` 会吃掉同区域的 `(TA)22`、`(TATA)11`）。
 
 **分歧从第 6 步开始**：如何把「motif 区间」映射到 query，以及统计什么。
 

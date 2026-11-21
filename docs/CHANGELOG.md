@@ -2,6 +2,31 @@
 
 格式参照 Keep a Changelog，版本与 git tag（`v*`）一一对应；0.8.1 之前未逐条记录。
 
+## Unreleased
+
+行为锁定的整体重构：全程 golden 字节级验收（fasta 6/6 + BAM 10/10），对外 CLI、输出格式、列集合均不变。
+
+### Added
+
+- CI（ci.yml）新增门禁：`cargo fmt --check`、`cargo clippy -D warnings`、release 构建后运行 `scripts/compare_golden.sh` / `compare_bam_golden.sh` 字节级 golden 验收。
+- 测试补强：hp-v2 / hp-tr-v2 端到端测试从纯 println 改为排序后逐行断言（基线以 Cargo.lock 锁定的 bandmap-core 捕获），`test_data` 路径改用 `CARGO_MANIFEST_DIR` 消除 cwd 依赖；新增 `get_target_substr` 序列末尾窗口回归测试。
+
+### Changed
+
+- 抽取三个 metric 复制的 ~80 行重对齐前缀为 `metrics/realign.rs::realign_hit`（mode 差异收敛为 `RealignConfig`），`HP_TR_REG` / `HP_REG` 正则表由 `MotifSpec` 统一派生。
+- `TMetric` trait 收紧为 `Metric`：列名 `COLUMNS` 单点声明，`MetricContext` 注入取代 9 个 accessor，「该 read 无输出」由 `MetricOutcome::Skipped` 显式表达（取代空 `metric_str` 哨兵），metric struct 只保留聚合状态。
+- `GlobalData` 的 enum 手工分派改为类型化 struct + `OnceCell` 字段；删除无消费者的 `TargetName2Seq` / `TargetRegion2Motif4Hp` 索引。
+- 删除死代码与死配置：`MapParams`/`MapArgs`（CLI 面不变）、`OupParams::discard_secondary`（从未生效，secondary 在 main 层无条件丢弃）、`oup_identity_threshold` / `oup_coverage_threshold`（恒 -1.0 且从未被查询）、`pass_through_tags` 及 `ReadInfo`/`BamRecordExt` 的整套 tag 提取设备（`ReadInfo` 仅保留实际消费的 name/seq/np/rq/qual）、无引用依赖 `ndarray`、空跑测试 `test_hp_tr_metric_case`（其 query 在 bandmap 下比对不到任何 hit）。
+- 魔法数常量化（线程模型 / identity 阈值 / 排序加分 / 重对齐打分），命名修正（`msa_entrence`→`msa_entrance` 等），`kits/dna.rs` 的 unsafe transmute 改安全实现。
+
+### Fixed
+
+- `get_target_substr` 窗口 `[len-1, len)` 顶到序列末尾时起点收缩循环越界 panic（Bug 8）。
+- 默认输出文件名 `rsplit_once(".")` 在 query 路径无扩展名时 panic、目录名含「.」时切错位置，改用 `Path::with_extension`（Bug 9）。
+- bam2-msa Shannon 熵静默丢弃 N 等非 -/A/C/G/T 碱基（Bug 10）。
+- bam2-msa `compute_max_ins_of_each_ref_position` 的 end 边界误用 `.max()`，调用方传入的 `rend` 上限被静默放大回 record 末尾（Bug 6，当前调用点未触发）；`draw_msa` 对 pos2ins 查不到的 ref 位点跳过该柱不再 panic（Bug 6）。
+- metric 输出与 msa 输出显式 flush 并检查错误（drop-flush 会吞掉磁盘满等错误）；primary target 提取不再对无 primary 的 hit 列表越界 panic（Bug 7）。
+
 ## 0.10.2 — 2026-11-22
 
 ### Added
