@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fs,
     io::{BufWriter, Write},
+    path::Path,
 };
 
 use noodles::sam::alignment::RecordBuf;
@@ -26,7 +27,12 @@ pub fn msa_entrance(cli: &Cli) {
     let mut reader = noodles::bam::io::Reader::from(bgzf_reader);
     let header = reader.read_header().unwrap();
     let output_filepath = cli.metric_args.get_oup_file(cli.mode);
-    let output_filepath = format!("{}.fasta", output_filepath.rsplit_once(".").unwrap().0);
+    // 用 Path 换扩展名（bug-report.md Bug 9：旧 rsplit_once 依赖路径含「.」，
+    // 无扩展名时 panic，目录名含「.」时会切错位置）
+    let output_filepath = Path::new(&output_filepath)
+        .with_extension("fasta")
+        .to_string_lossy()
+        .into_owned();
 
     let shannon_entroy_output_filepath = format!("{}.shannon.txt", output_filepath);
 
@@ -97,8 +103,12 @@ fn compute_max_ins_of_each_ref_position(
         let record_ext = BamRecordExt::new(record);
         let mut start = rstart.unwrap_or(record_ext.reference_start() as i64);
         let mut end = rend.unwrap_or(record_ext.reference_end() as i64);
+        // start 侧取 max（下限夹到 record 起点），end 侧取 min（上限夹到
+        // record 末端）。旧代码 end 侧误用 max，调用方传入的 rend 上限会被
+        // 静默放大回 record 末尾（bug-report.md Bug 6；当前唯一调用点
+        // rend=None 未触发）。
         start = start.max(record_ext.reference_start() as i64);
-        end = end.max(record_ext.reference_end() as i64);
+        end = end.min(record_ext.reference_end() as i64);
 
         let mut rpos_cursor = None;
         let mut cur_ins = 0;
@@ -269,10 +279,15 @@ fn draw_msa(
             }
 
             // fill base and dw
-            let tt = major_pos2major_starting_point
-                .get(&(rpos_cursor.unwrap() as usize))
-                .unwrap()
-                + minor_cursor;
+            // get 不到该 ref 位点（覆盖它的 read 全部以 deletion 收尾且该位点
+            // 是各自的 reference_end，从未进入 pos2ins）时跳过该柱，不再 panic
+            // （bug-report.md Bug 6）。
+            let Some(major_start) =
+                major_pos2major_starting_point.get(&(rpos_cursor.unwrap() as usize))
+            else {
+                continue;
+            };
+            let tt = major_start + minor_cursor;
             if let Some(qpos_) = qpos {
                 single_record_msa[tt] = query_seq_bytes[qpos_ as usize];
             }
@@ -282,7 +297,9 @@ fn draw_msa(
             .iter()
             .zip(all_locus_base_counter.iter_mut())
             .for_each(|(&base, base_counter)| {
-                base_counter.counter.entry(base).and_modify(|cnt| *cnt += 1);
+                // or_insert(0)：非 -/A/C/G/T 碱基（如 N）也要计入分母
+                // （bug-report.md Bug 10：旧 and_modify 只更新预置 key，N 被静默丢弃）
+                *base_counter.counter.entry(base).or_insert(0) += 1;
             });
 
         writeln!(&mut writer, ">{}", record_ext.get_qname()).unwrap();
@@ -297,6 +314,12 @@ fn draw_msa(
     }
     pb.finish();
 
+    // 显式 flush 并检查错误：drop-flush 会静默吞掉磁盘满等错误，导致
+    // 「成功」退出却丢尾部数据
+    writer
+        .flush()
+        .unwrap_or_else(|e| panic!("flush msa output {ofilename} failed: {e}"));
+
     let entropy_str = all_locus_base_counter
         .iter()
         .map(|locus| locus.shannon_entropy().to_string())
@@ -305,4 +328,5 @@ fn draw_msa(
 
     let mut ofile = fs::File::create(shann_entropy_ofilename).unwrap();
     ofile.write_all(entropy_str.as_bytes()).unwrap();
+    ofile.flush().unwrap();
 }

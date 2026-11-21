@@ -8,6 +8,7 @@ use std::{
 use clap::Parser;
 use crossbeam::channel::{Receiver, Sender};
 use noodles::{bam, bgzf};
+use once_cell::sync::Lazy;
 
 use crate::{
     adapter::Mapping,
@@ -291,10 +292,13 @@ where
     })
 }
 
+/// 调试开关（环境变量解析一次，避免每条 read 探测）。
+static DUMP_HITS_ENABLED: Lazy<bool> = Lazy::new(|| std::env::var_os("GSM2_DUMP_HITS").is_some());
+
 /// 调试用：设置环境变量 GSM2_DUMP_HITS 后，把每条 read 的全部 hits
 /// （过滤前）打到 stderr，便于端到端对比时定位差异来自比对层还是 metric 层。
 fn dump_hits_if_enabled(hits: &[Mapping]) {
-    if std::env::var_os("GSM2_DUMP_HITS").is_none() {
+    if !*DUMP_HITS_ENABLED {
         return;
     }
     for hit in hits {
@@ -353,6 +357,12 @@ pub fn dump_metric_worker(
             }
         }
     }
+
+    // 显式 flush 并检查错误：drop-flush 会静默吞掉磁盘满等错误，导致
+    // 「成功」退出却丢尾部数据
+    writer
+        .flush()
+        .unwrap_or_else(|e| panic!("flush metric output {fname} failed: {e}"));
 
     if let Some(v) = pb.as_ref() {
         v.finish()

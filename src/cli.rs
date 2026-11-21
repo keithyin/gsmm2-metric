@@ -157,11 +157,14 @@ impl IoArgs {
         let out_fn = if let Some(oup) = &self.outfn {
             oup.to_string()
         } else {
-            format!(
-                "{}.{:?}-fact.csv",
-                self.query[0].rsplit_once(".").unwrap().0,
-                mode
-            )
+            // 默认输出名：{query 去扩展名}.{mode}-fact.csv。用 Path 剥扩展名
+            // （bug-report.md Bug 9：旧 rsplit_once 在无扩展名时 panic、目录名
+            // 含「.」时会切错位置）
+            let stem = path::Path::new(&self.query[0])
+                .with_extension("")
+                .to_string_lossy()
+                .into_owned();
+            format!("{}.{:?}-fact.csv", stem, mode)
         };
         if let Some(dir) = path::Path::new(&out_fn).to_path_buf().parent()
             && !dir.exists()

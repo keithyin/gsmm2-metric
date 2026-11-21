@@ -1,5 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
+use once_cell::sync::Lazy;
+
+/// 调试开关（环境变量解析一次，避免每个 hit 探测）。
+static DUMP_REALIGN_ENABLED: Lazy<bool> =
+    Lazy::new(|| std::env::var_os("GSM2_DUMP_REALIGN").is_some());
+
 use bandmap::Preset;
 
 use crate::adapter::{self, Mapping};
@@ -89,7 +95,10 @@ pub fn get_target_substr<'a>(
         }
     }
 
-    while start < end {
+    // start 侧收缩：比较 [start] 与 [start+1]。额外要求 start+1 < len：
+    // 当 end 恰好顶到序列末尾且 start == len-1 时，旧写法会读 seq[len] 越界
+    // panic（bug-report.md Bug 8）；该防御不改变任何非 panic 路径的行为。
+    while start < end && start + 1 < ori_seq_bytes.len() {
         if ori_seq_bytes[start] == ori_seq_bytes[start + 1] {
             start += 1
         } else {
@@ -140,7 +149,7 @@ pub fn do_align_4_homo(ori_query_seq: &str, target_substr: &str) -> Option<Mappi
 
     let result = aligner.map_seq("query", ori_query_seq.as_bytes());
 
-    if std::env::var_os("GSM2_DUMP_REALIGN").is_some() {
+    if *DUMP_REALIGN_ENABLED {
         for m in &result.mappings {
             let q20: String = ori_query_seq.chars().take(20).collect();
             let t20: String = target_substr.chars().take(20).collect();
@@ -215,5 +224,18 @@ mod test {
         assert_eq!(get_target_substr(6, 2, false, fwd, rev), "");
         assert_eq!(get_target_substr(6, 2, true, fwd, rev), "");
         assert_eq!(get_target_substr(0, 100, false, fwd, rev), "");
+    }
+
+    /// Bug 8 回归：窗口 [len-1, len) 恰好顶到序列末尾时，起点收缩循环不得
+    /// 读 seq[len]（旧代码在此越界 panic）。守卫 `start + 1 < len` 使
+    /// start == len-1 的窗口跳过收缩、原样保留 1bp 窗口。
+    #[test]
+    fn test_get_target_substr_window_at_seq_end() {
+        // "ACGT": [3,4) 是 1bp 窗口，边界不在同聚物内 → "T"
+        assert_eq!(get_target_substr(3, 4, false, "ACGT", "ACGT"), "T");
+        // "AAAAA": [4,5) 顶到末尾，守卫跳过收缩 → 返回 "A"（旧代码 panic）
+        assert_eq!(get_target_substr(4, 5, false, "AAAAA", "AAAAA"), "A");
+        // 末位为 T 的 "AAAT"：[3,4) 不收缩
+        assert_eq!(get_target_substr(3, 4, false, "AAAT", "AAAT"), "T");
     }
 }
