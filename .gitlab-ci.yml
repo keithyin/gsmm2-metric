@@ -1,17 +1,15 @@
 # GitLab CI/CD
 # - test:所有 pipeline(main 分支 / MR / tag)上跑 cargo build + cargo test
-# - publish:v* tag 时发布到 crates.io(需要项目 CI/CD 变量
-#   CARGO_REGISTRY_TOKEN,即 crates.io API token;建议 masked + protected,
-#   若设 protected 需同时把 v* 加入 Protected tag 模式)
 # - release:推送 v* tag 时,构建 release 二进制并打包上传到
 #   Generic Package Registry,再创建 GitLab Release 并挂资产链接。
+#   crates.io 发布在 GitHub Actions(.github/workflows/rust.yml)执行,
+#   这里不再重复,避免同 tag 双发。
 #
 # 项目已纯 Rust 化(不再依赖 hts-sys C 工具链),标准 rust 镜像即可。
 # edition 2024 需要 rustc >= 1.85,rust:1 跟随最新稳定版。
 
 stages:
   - test
-  - publish
   - release
 
 variables:
@@ -34,23 +32,12 @@ test:
     - cargo build --verbose
     - cargo test --verbose
 
-publish:
-  stage: publish
-  # 仅 v 开头的 tag 触发;test 通过后再发布。
-  # cargo 从环境变量 CARGO_REGISTRY_TOKEN 读取 crates.io 凭据。
-  # 注意:crates.io 同一版本只能发布一次,重跑会报 already exists。
+release:
+  stage: release
+  # 仅 v 开头的 tag 触发;先跑完 test 再打包
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v/'
   needs: [test]
-  script:
-    - cargo publish --locked
-
-release:
-  stage: release
-  # 仅 v 开头的 tag 触发;先跑完 test + publish 再打包
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v/'
-  needs: [test, publish]
   script:
     - cargo build --release
     - tar czf "gsmm2-metric-${CI_COMMIT_TAG}-x86_64-linux.tar.gz" -C target/release gsmm2-metric
