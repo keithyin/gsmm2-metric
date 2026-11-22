@@ -2,7 +2,7 @@
 
 格式参照 Keep a Changelog，版本与 git tag（`v*`）一一对应；0.8.1 之前未逐条记录。
 
-## Unreleased
+## 0.11.0 — 2026-11-22
 
 ### Added
 

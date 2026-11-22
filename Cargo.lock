@@ -384,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "gsmm2-metric"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "bandmap-core",
  "clap",
