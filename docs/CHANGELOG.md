@@ -2,7 +2,7 @@
 
 格式参照 Keep a Changelog，版本与 git tag（`v*`）一一对应；0.8.1 之前未逐条记录。
 
-## Unreleased
+## 0.10.3 — 2026-11-22
 
 行为锁定的整体重构：全程 golden 字节级验收（fasta 6/6 + BAM 10/10），对外 CLI、输出格式、列集合均不变。
 
