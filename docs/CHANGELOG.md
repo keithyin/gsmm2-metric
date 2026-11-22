@@ -2,6 +2,18 @@
 
 格式参照 Keep a Changelog，版本与 git tag（`v*`）一一对应；0.8.1 之前未逐条记录。
 
+## Unreleased
+
+### Added
+
+- `--mode aligned`：全比对质量 metric（mm2 仓库 `gsmm2-aligned-metric` bin 的移植，mm2 三 metric bin 中最后一个迁入）。直接消费 raw mapping（不重对齐、不做 identity 过滤），多片段按 query 区间去重叠截断后合并统计，输出 45 列（segs/covlen/identity/homo ins-del/longIndel/per-base ACGT 分解）。保留 mm2 的「每条输入 read 恰好一行」语义：unmapped / `--noMar` 过滤的 read 输出全 0 占位行（identity 列为 `NaN`）；reverse hit 的 target 侧取反向互补切片、cigar 反序后按 read 方向展开（与 mm2 `TseqAndRecord::alignment_pair` 逐列一致，per-base 桶按 read 原始方向碱基计数）。golden 以 mm2 原版二进制输出为基线（fasta + BAM fixture），`--refAnchored` 对该 mode 无效。
+- `src/kits/regions.rs`：gskits `ds::region`（`Regions::ovlp_ratio` / `gaps`）的本地移植；`src/kits/dna.rs` 移植 `SEQ_NT4_TABLE`。
+
+### Changed
+
+- `Metric::compute` 返回类型 `MetricOutcome` → `Vec<String>`，删除 `MetricOutcome`（`Rows(vec![])` 与 `Skipped` 行为等价）；`--noMar` 命中的 read 改走与 unmapped 相同的空-mappings 路径（hp 系 mode 行为不变，`aligned` 借此产出占位行）。
+- `Metric` trait 新增关联常量 `IDENTITY_THRESHOLD: Option<f32>`（默认 `Some(0.75)`，即原 `main.rs` 硬编码行为；`aligned` 覆盖为 `None`），identity 过滤由 main 层按 mode 门控。
+
 ## 0.10.3 — 2026-11-22
 
 行为锁定的整体重构：全程 golden 字节级验收（fasta 6/6 + BAM 10/10），对外 CLI、输出格式、列集合均不变。

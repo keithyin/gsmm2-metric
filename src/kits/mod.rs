@@ -8,6 +8,7 @@ pub mod pbar;
 pub mod phreq;
 pub mod range;
 pub mod read_info;
+pub mod regions;
 
 pub use dna::reverse_complement;
 pub use pbar::{DEFAULT_INTERVAL, get_bar_pb, get_spin_pb};

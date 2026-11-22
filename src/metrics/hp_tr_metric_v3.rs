@@ -6,7 +6,7 @@ use crate::{
     adapter::Mapping,
     aligned_pairs::TAlignedPairs,
     metrics::{
-        Metric, MetricContext, MetricOutcome, join_row,
+        Metric, MetricContext, join_row,
         realign::{HP_TR_REG, RealignConfig, realign_hit},
     },
 };
@@ -139,7 +139,7 @@ impl Metric for HpTrMetricV3 {
         "alignspan",
     ];
 
-    fn compute(&mut self, ctx: MetricContext) -> MetricOutcome {
+    fn compute(&mut self, ctx: MetricContext) -> Vec<String> {
         let cfg = RealignConfig {
             shrink_to_boundary: true,
             reference_anchored: ctx.reference_anchored,
@@ -210,7 +210,7 @@ impl Metric for HpTrMetricV3 {
             }
         }
 
-        MetricOutcome::Rows(self.build_rows(&ctx.read.name, &ctx.target_name))
+        self.build_rows(&ctx.read.name, &ctx.target_name)
     }
 }
 
@@ -255,8 +255,8 @@ mod test {
         aligner::build_aligner_from_params,
         global_data::GlobalData,
         metrics::{
-            Metric, MetricContext, MetricOutcome, hp_tr_metric_v3::HpTrMetricV3,
-            hp_tr_metric_v3::build_ref2qpos, hp_tr_metric_v3::count_repeats,
+            Metric, MetricContext, hp_tr_metric_v3::HpTrMetricV3, hp_tr_metric_v3::build_ref2qpos,
+            hp_tr_metric_v3::count_repeats,
         },
         params::{AlignParams, IndexParams},
     };
@@ -337,16 +337,13 @@ mod test {
         let hits = adapter::align_single_query_to_targets(&aligner, &fwd_query_record);
 
         let mut metric = HpTrMetricV3::default();
-        let outcome = metric.compute(MetricContext {
+        let rows = metric.compute(MetricContext {
             read: fwd_query_record,
             target_name: Arc::new("target".to_string()),
             mappings: hits,
             global_data: global_data.clone(),
             reference_anchored: false,
         });
-        let MetricOutcome::Rows(rows) = outcome else {
-            panic!("expected rows");
-        };
         println!("metric:\n{}", rows.join("\n"));
 
         let rev_query_record = ReadInfo::new_fa_record(
@@ -357,16 +354,13 @@ mod test {
         let hits = adapter::align_single_query_to_targets(&aligner, &rev_query_record);
 
         let mut metric = HpTrMetricV3::default();
-        let outcome = metric.compute(MetricContext {
+        let rows = metric.compute(MetricContext {
             read: rev_query_record,
             target_name: Arc::new("target".to_string()),
             mappings: hits,
             global_data: global_data.clone(),
             reference_anchored: false,
         });
-        let MetricOutcome::Rows(rows) = outcome else {
-            panic!("expected rows");
-        };
         println!("metric:\n{}", rows.join("\n"));
     }
 
@@ -424,16 +418,13 @@ mod test {
             let hits = adapter::align_single_query_to_targets(&aligner, &query_record);
 
             let mut metric = HpTrMetricV3::default();
-            let outcome = metric.compute(MetricContext {
+            let rows = metric.compute(MetricContext {
                 read: query_record,
                 target_name: Arc::new("target".to_string()),
                 mappings: hits,
                 global_data: global_data.clone(),
                 reference_anchored: false,
             });
-            let MetricOutcome::Rows(rows) = outcome else {
-                panic!("{qname}: expected rows");
-            };
             let metric_str = rows.join("\n");
             println!("{qname} metric:\n{metric_str}\n");
 
@@ -518,16 +509,13 @@ mod test {
             let hits = adapter::align_single_query_to_targets(&aligner, &query_record);
 
             let mut metric = HpTrMetricV3::default();
-            let outcome = metric.compute(MetricContext {
+            let rows = metric.compute(MetricContext {
                 read: query_record,
                 target_name: Arc::new("target".to_string()),
                 mappings: hits,
                 global_data: global_data.clone(),
                 reference_anchored: false,
             });
-            let MetricOutcome::Rows(rows) = outcome else {
-                panic!("{qname}: expected rows");
-            };
             let metric_str = rows.join("\n");
             println!("{qname} metric:\n{metric_str}\n");
 

@@ -23,9 +23,9 @@ gsmm2-metric --mode hp-tr-v3 \
 - `--threads` 至少 10：其中 `threads - 4` 个线程算 metric，其余用于读入、比对、落盘。
 - 默认输出文件名 `{query 去掉扩展名}.{Mode:?}-fact.csv`，同时写一个同名 `.log`。**文件扩展名是 csv，实际分隔符是制表符**（历史原因），下游按 TSV 解析。
 - `--short-aln`：短 query / 短 target 场景下调低 kmer 与 min_cnt 等阈值（见 [src/cli.rs](src/cli.rs)）。
-- `--noSupp`：丢弃 supplementary，metric 只用 primary。`--noMar`：比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时整条 read 过滤掉、不产出输出行；判定先于 same-target / identity 过滤（跨 target 的 alt chain 也算），见 [main.rs](src/main.rs) 的 `compute_metric`。
+- `--noSupp`：丢弃 supplementary，metric 只用 primary。`--noMar`：比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时整条 read 过滤掉；判定先于 same-target / identity 过滤（跨 target 的 alt chain 也算），见 [main.rs](src/main.rs) 的 `compute_metric`。hp 系 mode 被过滤的 read 不产出输出行；`aligned` mode 产出全 0 占位行（见下节）。
 - `--noSeco`：兼容旗标。本管线中重比对产生的 secondary hit 在 `compute_metric` 的保留过滤中被无条件丢弃（恒等价于 `--noSeco` 开启），接受该参数仅为 mm2 版命令行兼容，无额外效果。
-- `--refAnchored`：reverse 比对先把 read 子串和 target 子串都反向互补再重对齐，使统计统一锚定到 reference 方向。**该开关同时影响 hp-tr-v2 / hp-tr-v3 / hp-v2 三个 mode 的取窗口逻辑**。
+- `--refAnchored`：reverse 比对先把 read 子串和 target 子串都反向互补再重对齐，使统计统一锚定到 reference 方向。**该开关同时影响 hp-tr-v2 / hp-tr-v3 / hp-v2 三个 mode 的取窗口逻辑**；`aligned` 不重对齐，该开关无效。
 
 ## Mode 一览
 
@@ -34,14 +34,33 @@ gsmm2-metric --mode hp-tr-v3 \
 | `hp-tr-v2` | [hp_tr_metric_v2.rs](src/metrics/hp_tr_metric_v2.rs) | **比对算子谱**：motif 区域内的 eq/diff/ins/del | `qname rname motif eq diff ins del` |
 | `hp-tr-v3` | [hp_tr_metric_v3.rs](src/metrics/hp_tr_metric_v3.rs) | **重复数分布**：ref repeats vs called repeats | `qname rname motif tag ref called num eq alignspan` |
 | `hp-v2` | [hp_metric_v2.rs](src/metrics/hp_metric_v2.rs) | **HP 重复数分布**（仅 unit 长度 1） | `qname rname motif tag called num eq alignspan` |
+| `aligned` | [aligned_metric.rs](src/metrics/aligned_metric.rs) | **全比对质量**（mm2 `gsmm2-aligned-metric` 的移植） | 45 列，见下节 |
 | `bam2-msa` | [msa.rs](src/msa.rs) | 不走 `Metric`，由 bam 生成 MSA fasta + 逐列 Shannon 熵 | `.fasta` / `.shannon.txt` |
+
+## aligned：全比对质量 metric
+
+[aligned_metric.rs](src/metrics/aligned_metric.rs)（mm2 `gsmm2-aligned-metric` bin 的忠实移植）
+
+与 hp-tr / hp 系 mode 的根本差异：
+
+1. **直接消费 raw mapping**，不做重对齐（`do_align_4_homo`）、不做 motif 边界收缩、不做 identity 过滤（`--refAnchored` 对其无效）——它本身就是评估比对质量的工具，低 identity read 恰恰是度量对象。
+2. **每条输入 read 恰好输出一行**：unmapped / 被 `--noMar` 过滤的 read 输出全 0 占位行（rname 为空、identity 列为 `NaN`），与 mm2 版逐字节对齐，便于下游按 read 对账。
+3. 多片段（primary + supplementary）按 query 区间**去重叠截断**后合并统计：`segs` = 截断后片段数，`covlen` = 截断后总跨度，`qOvlp` = 重叠碱基数，`mergedQrySpan` = 截断后片段列表。
+4. 主列（21 列）：`qname rname qlen segs covlen primaryCovlen queryCoverage identity oriAlignInfo oriQGaps qOvlp qOvlpRatio rOvlpRatio mergedQrySpan match misMatch ins homoIns del homoDel longIndel`，随后按 `A C G T` 各 6 列 `match-? misMatch-? ins-? homoIns-? del-? homoDel-?`（共 45 列）。
+5. 关键列语义：
+   - `identity` = `match / (match + misMatch + ins + del)`（比对算子谱口径，非 cigar identity）；
+   - `homoIns`：连续插入碱基一致且与左/右 ref 邻碱基其一一致；`homoDel`：被删 ref 碱基与其左/右邻碱基任一一致（逐碱基判定，mm2 v2 口径）；
+   - `longIndel`：连续 ≥10 的插入/删除长度（ins 正值 / del 负值，逗号分隔）；
+   - per-base 桶按 **query（read 原始方向）碱基**计数；reverse hit 的 target 侧取反向互补切片、cigar 反序后按 read 方向展开（与 mm2 `TseqAndRecord::alignment_pair` 逐列一致）；
+   - `oriQGaps`：未截断的 hit 区间在 `[0, qlen)` 内的 gap 序列（可含负值）。
 
 ## 共用流水线
 
 所有 metric mode 都走 [main.rs](src/main.rs) 的 `metric_entrance::<M>`：
 
 1. read 比对到 target（bandmap-core，纯 Rust 实现的 minimap2 风格 mapper；`--preset` / `-m -M -o -e` 控制打分）。
-2. `--noMar` 先行判定：比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时整条 read 过滤掉，不产出输出行；否则保留 primary（以及未开启 `--noSupp` 时的 supplementary），只保留与 primary **同一个 target** 的 hit，并且 `identity > 0.75`（[main.rs](src/main.rs) 的 `compute_metric`）。
+2. `--noMar` 先行判定：比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时整条 read 过滤掉；否则保留 primary（以及未开启 `--noSupp` 时的 supplementary），只保留与 primary **同一个 target** 的 hit，并且 `identity > 0.75`（[main.rs](src/main.rs) 的 `compute_metric`；identity 阈值按 mode 门控，`aligned` 不过滤）。
+3. hp 系 mode 走下面的「mode 无关前缀」（`aligned` 不做，直接消费 raw mapping，见上节）：
 3. 每个 hit 依次执行下面的「mode 无关前缀」：
    1. **motif 边界收缩**：如果比对端点落在某个 HP/TR 区域内部，就把端点收缩到该区域的边界，避免 flank 干扰重对齐。查的是 `GlobalData::region2motif_hptr`（按 reference 位点建索引，见 [global_data.rs](src/global_data.rs)）。仅 `hp-tr-v2` / `hp-tr-v3` 做这一步，`hp-v2` 不做。
    2. `get_target_substr()`：取 target 子串；如果切片边界落在同种碱基内部，再往内收缩 1~n 个碱基，保证窗口不切断 homopolymer（[hp_tr_tools.rs:16-49](src/metrics/hp_tr_tools.rs#L16-L49)）。

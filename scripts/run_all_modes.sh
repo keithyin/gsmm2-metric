@@ -26,3 +26,12 @@ for mode in hp-tr-v2 hp-tr-v3 hp-v2; do
         echo "done: $name"
     done
 done
+
+# aligned（全比对质量 metric）：不做 --refAnchored 交叉——该 flag 对其无效
+# （raw mapping 不重对齐），且 mm2 原版无此概念，golden 与 mm2
+# gsmm2-aligned-metric 输出对齐。
+"$BIN" --mode aligned "${ARGS[@]}" \
+    -q test_data/queries.fa \
+    -t test_data/ref_Saureus_ATCC25923.m.new.corrected.fasta \
+    --out "$OUTDIR/aligned.csv"
+echo "done: aligned"

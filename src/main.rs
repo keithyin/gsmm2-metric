@@ -22,7 +22,7 @@ use crate::{
         read_info::ReadInfo,
     },
     metrics::{
-        Metric, MetricContext, MetricOutcome, hp_metric_v2::HpMetricV2,
+        Metric, MetricContext, aligned_metric::AlignedMetric, hp_metric_v2::HpMetricV2,
         hp_tr_metric_v2::HpTrMetricV2, hp_tr_metric_v3::HpTrMetricV3,
     },
     msa::msa_entrance,
@@ -48,9 +48,6 @@ const OUTPUT_THREAD_RESERVE: usize = 4;
 const CHANNEL_CAP: usize = 1000;
 /// BAM 输入的 BGZF 解压 worker 数（等价 rust-htslib set_threads(4)）。
 const BAM_BGZF_WORKERS: usize = 4;
-/// 参与 metric 统计的 hit 最低 identity（same-target 过滤后应用）。
-const MIN_PRIMARY_IDENTITY: f32 = 0.75;
-
 fn main() {
     let mut cli = Cli::parse();
     cli.post_process_param();
@@ -92,6 +89,10 @@ fn main() {
 
         Mode::HpV2 => {
             metric_entrance::<HpMetricV2>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
+        }
+
+        Mode::Aligned => {
+            metric_entrance::<AlignedMetric>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
         }
 
         Mode::Bam2Msa => {
@@ -215,7 +216,7 @@ pub fn query_seq_sender(
 
 pub fn compute_metric_worker<M>(
     receiver: Receiver<ReadInfo>,
-    sender: Sender<MetricOutcome>,
+    sender: Sender<Vec<String>>,
     global_data: Arc<GlobalData>,
     aligner: &bandmap::Aligner,
     oup_params: &OupParams,
@@ -252,23 +253,32 @@ pub fn compute_metric<M>(
     oup_params: &OupParams,
     global_data: Arc<GlobalData>,
     ref_anchored: bool,
-) -> MetricOutcome
+) -> Vec<String>
 where
     M: Metric,
 {
     dump_hits_if_enabled(&hits);
 
     // --noMar：query 比对产生不止一个 chain（存在 supplementary/secondary）时，
-    // 整条 query 过滤掉，不产出 metric 行。判定必须在所有下游过滤之前——
+    // 整条 query 过滤掉。判定必须在所有下游过滤之前——
     // secondary 会在下面的 primary/supp 保留过滤中被丢弃，same-target 过滤会丢
     // 跨 target 的 alt chain，但它们都必须参与 chain 判定。语义对应 mm2
     // align_worker 的 `records.len() > 1 -> continue`（存在 supp/secondary 即扔）。
+    //
+    // 过滤方式：走与 unmapped 相同的空-mappings 路径——hp 三 mode 产出空行集合
+    // （不落盘），aligned mode 产出占位行（「每条输入 read 恰好一行」语义）。
     if oup_params.discard_multi_align_reads && has_multiple_chains(&hits) {
         tracing::debug!(
             "noMar: query {} has supplementary/secondary chains, filtered",
             read_info.name
         );
-        return MetricOutcome::Skipped;
+        return M::default().compute(MetricContext {
+            read: read_info,
+            target_name: Arc::new(String::new()),
+            mappings: Vec::new(),
+            global_data,
+            reference_anchored: ref_anchored,
+        });
     }
 
     let hits = hits
@@ -288,7 +298,11 @@ where
     let hits = hits
         .into_iter()
         .filter(|v| v.target_name.as_ref().unwrap() == &target_name)
-        .filter(|v| v.identity() > MIN_PRIMARY_IDENTITY)
+        // identity 过滤按 mode 门控：aligned 等质量评估类 mode 不过滤
+        .filter(|v| match M::IDENTITY_THRESHOLD {
+            Some(threshold) => v.identity() > threshold,
+            None => true,
+        })
         .collect::<Vec<_>>();
 
     let mut metric = M::default();
@@ -337,7 +351,7 @@ fn dump_hits_if_enabled(hits: &[Mapping]) {
 
 pub fn dump_metric_worker(
     header: &str,
-    metric_recv: Receiver<MetricOutcome>,
+    metric_recv: Receiver<Vec<String>>,
     fname: &str,
     enable_pb: bool,
 ) {
@@ -356,14 +370,12 @@ pub fn dump_metric_worker(
         None
     };
 
-    for outcome in metric_recv {
+    for rows in metric_recv {
         if let Some(v) = pb.as_ref() {
             v.inc(1)
         }
-        if let MetricOutcome::Rows(rows) = outcome {
-            for row in rows {
-                writeln!(&mut writer, "{}", row).unwrap();
-            }
+        for row in rows {
+            writeln!(&mut writer, "{}", row).unwrap();
         }
     }
 

@@ -62,6 +62,11 @@ pub enum Mode {
 
     HpV2,
 
+    /// whole-alignment quality metric (mm2 gsmm2-aligned-metric port): segs / covlen /
+    /// identity / homo indels / long indels / per-base decomposition, one row per input
+    /// read (placeholder row for unmapped / --noMar-filtered reads)
+    Aligned,
+
     Bam2Msa,
 }
 

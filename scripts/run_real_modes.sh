@@ -27,3 +27,10 @@ for mode in hp-tr-v2 hp-tr-v3 hp-v2; do
         echo "done: $name"
     done
 done
+
+# aligned（全比对质量 metric）：不做 --refAnchored 交叉（对该 mode 无效）
+"$BIN" --mode aligned "${ARGS[@]}" \
+    -q "$QUERY" \
+    -t "$TARGET" \
+    --out "$OUTDIR/aligned.csv"
+echo "done: aligned"

@@ -29,6 +29,13 @@ for mode in hp-tr-v2 hp-tr-v3 hp-v2; do
     done
 done
 
+# aligned（全比对质量 metric；BAM 输入路径；不做 --refAnchored 交叉，理由同 run_all_modes.sh）
+"$BIN" --mode aligned "${ARGS[@]}" \
+    -q "$BAM" \
+    -t test_data/ref_Saureus_ATCC25923.m.new.corrected.fasta \
+    --out "$OUTDIR/aligned.csv"
+echo "done: aligned"
+
 # np/rq 过滤
 "$BIN" --mode hp-v2 "${ARGS[@]}" \
     --np-range 1:2 --rq-range 0.9:1.0 \

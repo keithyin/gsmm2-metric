@@ -5,7 +5,7 @@ use hp_tr_finder::single_seq_hp_tr_finder;
 use crate::{
     aligned_pairs::{AlignOp, TAlignedPairs},
     metrics::{
-        Metric, MetricContext, MetricOutcome, join_row,
+        Metric, MetricContext, join_row,
         realign::{HP_TR_REG, RealignConfig, realign_hit},
     },
 };
@@ -40,7 +40,7 @@ impl Metric for HpTrMetricV2 {
     const COLUMNS: &'static [&'static str] =
         &["qname", "rname", "motif", "eq", "diff", "ins", "del"];
 
-    fn compute(&mut self, ctx: MetricContext) -> MetricOutcome {
+    fn compute(&mut self, ctx: MetricContext) -> Vec<String> {
         let cfg = RealignConfig {
             shrink_to_boundary: true,
             reference_anchored: ctx.reference_anchored,
@@ -88,7 +88,7 @@ impl Metric for HpTrMetricV2 {
             }
         }
 
-        MetricOutcome::Rows(self.build_rows(&ctx.read.name, &ctx.target_name))
+        self.build_rows(&ctx.read.name, &ctx.target_name)
     }
 }
 
@@ -124,7 +124,7 @@ mod test {
         adapter,
         aligner::build_aligner_from_params,
         global_data::GlobalData,
-        metrics::{Metric, MetricContext, MetricOutcome, hp_tr_metric_v2::HpTrMetricV2},
+        metrics::{Metric, MetricContext, hp_tr_metric_v2::HpTrMetricV2},
         params::{AlignParams, IndexParams},
     };
 
@@ -195,16 +195,13 @@ mod test {
         }
 
         let mut metric = HpTrMetricV2::default();
-        let outcome = metric.compute(MetricContext {
+        let rows = metric.compute(MetricContext {
             read: fwd_query_record,
             target_name: Arc::new("target".to_string()),
             mappings: hits,
             global_data: global_data.clone(),
             reference_anchored: false,
         });
-        let MetricOutcome::Rows(rows) = outcome else {
-            panic!("expected rows");
-        };
         println!("metric:\n{}", rows.join("\n"));
         assert_metric_rows(
             &rows.join("\n"),
@@ -236,16 +233,13 @@ mod test {
         }
 
         let mut metric = HpTrMetricV2::default();
-        let outcome = metric.compute(MetricContext {
+        let rows = metric.compute(MetricContext {
             read: rev_query_record,
             target_name: Arc::new("target".to_string()),
             mappings: hits,
             global_data: global_data.clone(),
             reference_anchored: false,
         });
-        let MetricOutcome::Rows(rows) = outcome else {
-            panic!("expected rows");
-        };
         println!("metric:\n{}", rows.join("\n"));
         assert_metric_rows(
             &rows.join("\n"),
