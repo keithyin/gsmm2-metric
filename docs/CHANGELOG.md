@@ -10,6 +10,7 @@
 
 - CI（ci.yml）新增门禁：`cargo fmt --check`、`cargo clippy -D warnings`、release 构建后运行 `scripts/compare_golden.sh` / `compare_bam_golden.sh` 字节级 golden 验收。
 - 测试补强：hp-v2 / hp-tr-v2 端到端测试从纯 println 改为排序后逐行断言（基线以 Cargo.lock 锁定的 bandmap-core 捕获），`test_data` 路径改用 `CARGO_MANIFEST_DIR` 消除 cwd 依赖；新增 `get_target_substr` 序列末尾窗口回归测试。
+- `--noSeco` 兼容旗标：仅被 CLI 接受并在 log 留痕，不进 `OupParams`。本管线中重比对产生的 secondary hit 在 `compute_metric` 保留过滤中本就被无条件丢弃（恒等价于 `--noSeco` 开启），旗标无额外行为，用于 mm2 版命令行兼容；顺带修正 `compute_metric` 注释中对已删除的 `discard_secondary` 过滤的指称。
 
 ### Changed
 

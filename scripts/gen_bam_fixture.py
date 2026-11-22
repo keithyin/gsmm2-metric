@@ -185,7 +185,8 @@ def main(out_path):
     reads.append(("r7_reverse", 16, 7000, 60, "250=1X249=5S", q, 30,
                   aux_i32(b"np", 1) + aux_f32(b"rq", 0.95)))
 
-    # r8: secondary(会被 metric 丢弃,bam2-msa 过滤)
+    # r8: secondary 旗标仅 bam2-msa 会过滤；metric 模式不检查输入旗标，
+    # 会把该记录当独立 query 重比对并产出行（--noSeco 为 mm2 兼容旗标，不改变此行为）
     s = sub(8000, 8500)
     reads.append(("r8_secondary", 256, 8000, 3, "500=", s, 30,
                   aux_i32(b"np", 1) + aux_f32(b"rq", 0.95)))

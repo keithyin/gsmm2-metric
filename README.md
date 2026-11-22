@@ -24,6 +24,7 @@ gsmm2-metric --mode hp-tr-v3 \
 - 默认输出文件名 `{query 去掉扩展名}.{Mode:?}-fact.csv`，同时写一个同名 `.log`。**文件扩展名是 csv，实际分隔符是制表符**（历史原因），下游按 TSV 解析。
 - `--short-aln`：短 query / 短 target 场景下调低 kmer 与 min_cnt 等阈值（见 [src/cli.rs](src/cli.rs)）。
 - `--noSupp`：丢弃 supplementary，metric 只用 primary。`--noMar`：比对产生不止一个 chain（存在 supplementary 或 secondary mapping）时整条 read 过滤掉、不产出输出行；判定先于 same-target / identity 过滤（跨 target 的 alt chain 也算），见 [main.rs](src/main.rs) 的 `compute_metric`。
+- `--noSeco`：兼容旗标。本管线中重比对产生的 secondary hit 在 `compute_metric` 的保留过滤中被无条件丢弃（恒等价于 `--noSeco` 开启），接受该参数仅为 mm2 版命令行兼容，无额外效果。
 - `--refAnchored`：reverse 比对先把 read 子串和 target 子串都反向互补再重对齐，使统计统一锚定到 reference 方向。**该开关同时影响 hp-tr-v2 / hp-tr-v3 / hp-v2 三个 mode 的取窗口逻辑**。
 
 ## Mode 一览

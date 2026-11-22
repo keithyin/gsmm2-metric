@@ -72,6 +72,15 @@ fn main() {
         .with_writer(non_blocking)
         .init();
 
+    // --noSeco 为 mm2 版 CLI 兼容旗标：本管线中重比对产生的 secondary hit 在
+    // compute_metric 的保留过滤中被无条件丢弃（恒等价于 --noSeco 开启），
+    // 旗标本身无可观测效果，仅接受并留痕。
+    if cli.metric_args.oup_args.discard_secondary {
+        tracing::info!(
+            "noSeco: secondary hits are always excluded in this pipeline; flag accepted for mm2 CLI compatibility"
+        );
+    }
+
     match cli.mode {
         Mode::HpTrV2 => {
             metric_entrance::<HpTrMetricV2>(&cli.preset, cli.threads, cli.mode, &cli.metric_args);
@@ -251,7 +260,7 @@ where
 
     // --noMar：query 比对产生不止一个 chain（存在 supplementary/secondary）时，
     // 整条 query 过滤掉，不产出 metric 行。判定必须在所有下游过滤之前——
-    // secondary 会在下面的 discard_secondary 过滤中被丢弃，same-target 过滤会丢
+    // secondary 会在下面的 primary/supp 保留过滤中被丢弃，same-target 过滤会丢
     // 跨 target 的 alt chain，但它们都必须参与 chain 判定。语义对应 mm2
     // align_worker 的 `records.len() > 1 -> continue`（存在 supp/secondary 即扔）。
     if oup_params.discard_multi_align_reads && has_multiple_chains(&hits) {

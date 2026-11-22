@@ -255,6 +255,12 @@ pub struct OupArgs {
     pub discard_supplementary: bool,
 
     #[arg(
+        long = "noSeco",
+        help = "discard secondary alignment, only keep the primary alignment for metric (compat flag: secondary hits are always excluded in this pipeline; accepted for mm2 CLI compatibility)"
+    )]
+    pub discard_secondary: bool,
+
+    #[arg(
         long = "noMar",
         help = "drop the whole query if its alignment yields more than one chain (any supplementary/secondary mapping); filtered queries produce no output row"
     )]
